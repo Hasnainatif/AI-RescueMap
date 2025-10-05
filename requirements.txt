@@ -9,3 +9,4 @@ google-generativeai
 python-dateutil
 pytz
 rasterio
+geopy
