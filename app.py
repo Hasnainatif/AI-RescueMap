@@ -66,61 +66,131 @@ CONFIG = {
     "EONET_API": "https://eonet.gsfc.nasa.gov/api/v3/events",
     "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",
     "IPAPI_URL": "https://ipapi.co/json/",
-    "IPAPI_BACKUP": "http://ip-api.com/json/",
-    "GEOCODING_API": "https://nominatim.openstreetmap.org/search"
+    "IPAPI_BACKUP": "http://ip-api.com/json/"
 }
 
-# ✅ NEW: Geocode city/country to lat/lon (works worldwide!)
-def geocode_location(city_or_address: str):
+# ✅ FIXED: Multiple geocoding services with fallbacks
+def geocode_location(location_query):
     """
-    Convert city name or address to lat/lon using OpenStreetMap Nominatim.
-    Works for ANY city or country in the world!
+    Convert city/country name to coordinates using multiple services.
+    Works for ANY city in the world!
     
-    Examples:
-    - "Faisalabad, Pakistan"
-    - "New York"
-    - "Tokyo, Japan"
-    - "Paris, France"
+    Args:
+        location_query (str): e.g., "Faisalabad, Pakistan", "New York", "Tokyo, Japan"
+    
+    Returns:
+        dict: {'lat': float, 'lon': float, 'city': str, 'country': str} or None
     """
-    try:
-        params = {
-            'q': city_or_address,
-            'format': 'json',
-            'limit': 1
+    
+    # Try multiple geocoding services
+    services = [
+        # Service 1: Nominatim (OpenStreetMap) - Free, no API key needed
+        {
+            'name': 'Nominatim',
+            'url': 'https://nominatim.openstreetmap.org/search',
+            'params': {
+                'q': location_query,
+                'format': 'json',
+                'limit': 1
+            },
+            'headers': {'User-Agent': 'AI-RescueMap/1.0 (disaster-monitoring-app)'}
+        },
+        
+        # Service 2: Photon (OpenStreetMap data) - Free, faster
+        {
+            'name': 'Photon',
+            'url': 'https://photon.komoot.io/api/',
+            'params': {
+                'q': location_query,
+                'limit': 1
+            },
+            'headers': {}
+        },
+        
+        # Service 3: LocationIQ (requires free API key, but has backup)
+        {
+            'name': 'OpenCage',
+            'url': 'https://api.opencagedata.com/geocode/v1/json',
+            'params': {
+                'q': location_query,
+                'key': 'demo-key',  # Limited demo key, replace with your own for production
+                'limit': 1
+            },
+            'headers': {}
         }
-        headers = {'User-Agent': 'AI-RescueMap/1.0 (NASA Space Apps 2025)'}
-        
-        response = requests.get(CONFIG["GEOCODING_API"], params=params, headers=headers, timeout=5)
-        data = response.json()
-        
-        if data and len(data) > 0:
-            result = data[0]
-            return {
-                'lat': float(result['lat']),
-                'lon': float(result['lon']),
-                'city': result.get('display_name', city_or_address).split(',')[0],
-                'country': result.get('display_name', '').split(',')[-1].strip(),
-                'region': result.get('display_name', '').split(',')[1].strip() if ',' in result.get('display_name', '') else 'Unknown',
-                'full_address': result.get('display_name', city_or_address),
-                'method': 'manual',
-                'source': 'Geocoded'
-            }
-        else:
-            return None
-    except Exception as e:
-        st.error(f"Geocoding failed: {e}")
-        return None
+    ]
+    
+    for service in services:
+        try:
+            response = requests.get(
+                service['url'],
+                params=service['params'],
+                headers=service['headers'],
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Parse response based on service
+                if service['name'] == 'Nominatim':
+                    if data and len(data) > 0:
+                        result = data[0]
+                        return {
+                            'lat': float(result['lat']),
+                            'lon': float(result['lon']),
+                            'city': result.get('display_name', '').split(',')[0].strip(),
+                            'country': result.get('display_name', '').split(',')[-1].strip(),
+                            'region': result.get('display_name', '').split(',')[1].strip() if len(result.get('display_name', '').split(',')) > 1 else '',
+                            'source': 'Manual (Nominatim)'
+                        }
+                
+                elif service['name'] == 'Photon':
+                    if data.get('features') and len(data['features']) > 0:
+                        feature = data['features'][0]
+                        props = feature['properties']
+                        coords = feature['geometry']['coordinates']
+                        
+                        return {
+                            'lat': float(coords[1]),
+                            'lon': float(coords[0]),
+                            'city': props.get('city') or props.get('name', 'Unknown'),
+                            'country': props.get('country', 'Unknown'),
+                            'region': props.get('state', 'Unknown'),
+                            'source': 'Manual (Photon)'
+                        }
+                
+                elif service['name'] == 'OpenCage':
+                    if data.get('results') and len(data['results']) > 0:
+                        result = data['results'][0]
+                        components = result['components']
+                        geometry = result['geometry']
+                        
+                        return {
+                            'lat': float(geometry['lat']),
+                            'lon': float(geometry['lng']),
+                            'city': components.get('city') or components.get('town') or components.get('village', 'Unknown'),
+                            'country': components.get('country', 'Unknown'),
+                            'region': components.get('state', 'Unknown'),
+                            'source': 'Manual (OpenCage)'
+                        }
+            
+        except Exception as e:
+            st.caption(f"⚠️ {service['name']} failed: {str(e)[:100]}")
+            continue
+    
+    return None
 
-# ✅ AUTO: Get location from browser IP (default method)
-def get_auto_location():
-    """Get location automatically from IP address"""
+# Automatic IP-based location detection (original function)
+@st.cache_data(ttl=3600)
+def get_ip_location():
+    """Get location from IP address (shows server location on Streamlit Cloud)"""
     try:
-        # Try primary API
         response = requests.get(CONFIG["IPAPI_URL"], timeout=5)
         data = response.json()
         
         if 'error' in data and data['error']:
-            raise Exception(f"API error: {data.get('reason', 'Unknown')}")
+            raise Exception(f"ipapi.co error: {data.get('reason', 'Unknown')}")
         
         if 'latitude' not in data or 'longitude' not in data:
             raise KeyError("Missing coordinates")
@@ -133,17 +203,16 @@ def get_auto_location():
             'region': data.get('region', 'Unknown'),
             'ip': data.get('ip', 'Unknown'),
             'org': data.get('org', ''),
-            'method': 'auto',
             'source': 'IP Geolocation'
         }
     except Exception as e:
-        # Try backup API
+        # Backup service
         try:
             alt_response = requests.get(CONFIG["IPAPI_BACKUP"], timeout=5)
             alt_data = alt_response.json()
             
             if alt_data.get('status') != 'success':
-                raise Exception(f"Backup failed: {alt_data.get('message', 'Unknown')}")
+                raise Exception(f"Backup failed")
             
             return {
                 'lat': float(alt_data['lat']),
@@ -153,14 +222,17 @@ def get_auto_location():
                 'region': alt_data.get('regionName', 'Unknown'),
                 'ip': alt_data.get('query', 'Unknown'),
                 'org': alt_data.get('isp', ''),
-                'method': 'auto',
                 'source': 'IP Geolocation (Backup)'
             }
         except Exception as backup_error:
-            st.warning(f"⚠️ Auto-detection failed: {backup_error}")
+            st.error(f"❌ Auto-detection failed: {backup_error}")
             return None
 
-# ✅ FIXED: Correct Gemini model names
+def get_user_location():
+    """Get user location (auto-detect by default)"""
+    return get_ip_location()
+
+# ✅ FIXED: Correct Gemini model name
 def setup_gemini(api_key: str = None, model_type: str = "text"):
     if not GEMINI_AVAILABLE:
         return None
@@ -171,11 +243,11 @@ def setup_gemini(api_key: str = None, model_type: str = "text"):
         try:
             genai.configure(api_key=key)
             
-            # ✅ Correct model names (no "models/" prefix for newer API versions)
+            # ✅ Correct model names (no "models/" prefix)
             model_map = {
-                "text": "gemini-2.5-pro",  # For text generation
-                "image": "gemini-2.5-flash",  # ✅ FIXED: Use Flash for images (has vision)
-                "chat": "gemini-2.5-flash"  # For chat
+                "text": "gemini-2.5-pro",
+                "image": "gemini-2.5-flash",  # ✅ FIXED: Use Flash for images
+                "chat": "gemini-2.5-flash"
             }
             
             model_name = model_map.get(model_type, "gemini-2.5-pro")
@@ -185,6 +257,7 @@ def setup_gemini(api_key: str = None, model_type: str = "text"):
             return None
     return None
 
+# [KEEP ALL OTHER FUNCTIONS FROM YOUR ORIGINAL CODE]
 @st.cache_data(ttl=1800)
 def fetch_nasa_eonet_disasters(status="open", limit=100):
     try:
@@ -255,7 +328,6 @@ def generate_population_data(center_lat, center_lon, radius_deg=2.0, num_points=
     return pd.DataFrame({'lat': lats, 'lon': lons, 'population': populations})
 
 def calculate_distance(lat1, lon1, lat2, lon2):
-    """Calculate distance in km using Haversine formula"""
     from math import radians, cos, sin, asin, sqrt
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
@@ -382,10 +454,7 @@ Provide:
                         'success': False,
                         'message': f"""⚠️ **Rate Limit Exceeded**
 
-Free tier quota hit. Please:
-1. ⏰ Wait 2-3 minutes
-2. 🔄 Use fewer requests (15/min limit)
-3. 💳 Upgrade at https://ai.google.dev
+Free tier quota hit. Please wait 2-3 minutes.
 
 Error: {error_msg[:200]}"""
                     }
@@ -396,7 +465,7 @@ Error: {error_msg[:200]}"""
 
 # Initialize session state
 if 'location' not in st.session_state:
-    st.session_state.location = get_auto_location()
+    st.session_state.location = get_user_location()
 
 if 'manual_location' not in st.session_state:
     st.session_state.manual_location = None
@@ -407,7 +476,7 @@ if 'gemini_model_text' not in st.session_state:
 if 'gemini_model_image' not in st.session_state:
     st.session_state.gemini_model_image = None
 
-# ✅ IMPROVED SIDEBAR with auto + manual options
+# ✅ IMPROVED SIDEBAR with easy manual location input
 with st.sidebar:
     st.image("https://www.nasa.gov/sites/default/files/thumbnails/image/nasa-logo-web-rgb.png", width=180)
     st.markdown("## 🌍 AI-RescueMap")
@@ -416,87 +485,102 @@ with st.sidebar:
     menu = st.radio("Navigation", ["🗺 Disaster Map", "💬 AI Guidance", "🖼 Image Analysis", "📊 Analytics"])
     
     st.markdown("---")
+    
+    # Current location display
     st.markdown("### 🎯 Your Location")
     
     # Use manual location if set, otherwise auto
-    if st.session_state.manual_location:
-        loc = st.session_state.manual_location
-        location_badge = "📍 Manual"
-    else:
-        loc = st.session_state.location
-        location_badge = "🌐 Auto-detected"
+    loc = st.session_state.manual_location if st.session_state.manual_location else st.session_state.location
     
     if loc:
-        st.success(f"**{loc['city']}, {loc['region']}**")
-        st.info(f"🌍 {loc['country']}")
-        st.caption(f"{location_badge} | Source: {loc.get('source', 'Unknown')}")
+        # Detect if cloud server
+        is_cloud = False
+        if loc.get('org') and any(x in loc.get('org', '').lower() for x in ['google', 'amazon', 'cloud', 'hosting']):
+            is_cloud = True
         
+        # Display location
+        if loc.get('source') and 'Manual' in loc.get('source', ''):
+            st.success(f"📍 **{loc['city']}**")
+            st.caption(f"🌍 {loc['country']}")
+            st.caption(f"✅ Manual Location")
+        else:
+            st.info(f"**{loc['city']}, {loc['region']}**")
+            st.caption(f"🌍 {loc['country']}")
+            st.caption(f"🌐 Auto-detected | Source: {loc.get('source', 'Unknown')}")
+        
+        # Details expander
         with st.expander("ℹ️ Details"):
             st.caption(f"**Lat/Lon:** {loc['lat']:.4f}, {loc['lon']:.4f}")
-            if loc.get('method') == 'auto' and loc.get('ip'):
-                st.caption(f"**IP:** {loc.get('ip', 'N/A')}")
-                if loc.get('org'):
-                    st.caption(f"**ISP:** {loc.get('org', 'N/A')[:50]}")
-            elif loc.get('method') == 'manual':
-                st.caption(f"**Full Address:** {loc.get('full_address', 'N/A')}")
+            if loc.get('ip'):
+                st.caption(f"**IP:** {loc.get('ip')}")
+            if loc.get('org'):
+                st.caption(f"**ISP:** {loc.get('org', 'N/A')}")
+        
+        # Cloud warning
+        if is_cloud and not st.session_state.manual_location:
+            st.warning("☁️ **Streamlit Cloud Server Detected**\n\n"
+                      "This is the server's location (Google's data center).\n\n"
+                      "👇 Use manual location below for accurate results.")
     else:
         st.error("❌ Location unavailable")
     
-    # Manual location input section
+    # Manual location input
     st.markdown("---")
     st.markdown("### 📍 Set Manual Location")
     st.caption("🌍 Works for ANY city in the world!")
     
     with st.expander("🔧 Enter Your Location"):
-        st.info("**Examples:**\n"
-                "- Faisalabad, Pakistan\n"
-                "- New York, USA\n"
-                "- Tokyo, Japan\n"
-                "- London, UK\n"
-                "- Sydney, Australia")
+        st.markdown("""
+**Examples:**
+- `Faisalabad, Pakistan`
+- `New York, USA`
+- `Tokyo, Japan`
+- `London, UK`
+- `Sydney, Australia`
+        """)
         
-        location_input = st.text_input(
+        manual_query = st.text_input(
             "City/Country",
             value="",
-            placeholder="e.g., Faisalabad, Pakistan",
-            help="Enter your city and country. We'll automatically find coordinates!"
+            placeholder="e.g., Okara, Pakistan",
+            help="Enter city name and country. Works worldwide!"
         )
         
         col_btn1, col_btn2 = st.columns(2)
         
         with col_btn1:
-            if st.button("🔍 Find Location", use_container_width=True, disabled=not location_input):
-                if location_input:
-                    with st.spinner(f"🌍 Finding {location_input}..."):
-                        geocoded = geocode_location(location_input)
-                        if geocoded:
-                            st.session_state.manual_location = geocoded
-                            st.success(f"✅ Found: {geocoded['full_address']}")
-                            time.sleep(1)
+            if st.button("🔍 Find Location", use_container_width=True, disabled=not manual_query):
+                if manual_query:
+                    with st.spinner(f"🔎 Finding '{manual_query}'..."):
+                        result = geocode_location(manual_query)
+                        
+                        if result:
+                            st.session_state.manual_location = result
+                            st.success(f"✅ Found: {result['city']}, {result['country']}")
+                            time.sleep(0.5)
                             st.rerun()
                         else:
-                            st.error(f"❌ Could not find '{location_input}'. Try:\n"
-                                   "- Adding country name\n"
-                                   "- Checking spelling\n"
-                                   "- Using English name")
+                            st.error(f"❌ Could not find '{manual_query}'. Try:\n"
+                                    "- Adding country name\n"
+                                    "- Checking spelling\n"
+                                    "- Using English name")
         
         with col_btn2:
-            if st.session_state.manual_location and st.button("🔄 Reset to Auto", use_container_width=True):
+            if st.button("🔄 Reset to Auto", use_container_width=True, disabled=not st.session_state.manual_location):
                 st.session_state.manual_location = None
-                st.success("✅ Switched back to auto-detection")
+                st.success("✅ Reset to auto-detection")
                 time.sleep(0.5)
                 st.rerun()
     
-    # Auto location refresh
-    if not st.session_state.manual_location:
-        if st.button("🔄 Refresh Auto Location", use_container_width=True):
-            with st.spinner("📡 Detecting location..."):
-                st.cache_data.clear()
-                st.session_state.location = get_auto_location()
-                time.sleep(0.5)
-            st.rerun()
+    # Refresh button
+    if st.button("🔄 Refresh Auto Location", use_container_width=True):
+        with st.spinner("📡 Detecting..."):
+            st.cache_data.clear()
+            st.session_state.location = get_user_location()
+            if not st.session_state.manual_location:
+                st.rerun()
 
-# Main header
+# Main content
 st.markdown('<h1 class="main-header">AI-RescueMap 🌍</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Real-time disaster monitoring with NASA data & Google Gemini 2.5 AI</p>', unsafe_allow_html=True)
 
@@ -508,8 +592,8 @@ if gemini_api_key:
     if st.session_state.gemini_model_image is None:
         st.session_state.gemini_model_image = setup_gemini(gemini_api_key, "image")
 
-# ========== REST OF THE CODE (Disaster Map, AI Guidance, Image Analysis, Analytics) ==========
-# [Keep all your existing menu code - it's working perfectly!]
+# [KEEP ALL YOUR MENU CODE - DISASTER MAP, AI GUIDANCE, IMAGE ANALYSIS, ANALYTICS]
+# The rest of your code remains exactly the same...
 
 if menu == "🗺 Disaster Map":
     with st.spinner("🛰 Fetching NASA EONET data..."):
@@ -662,7 +746,7 @@ elif menu == "🖼 Image Analysis":
     from PIL import Image
     
     st.markdown("## 🖼 AI Image Analysis")
-    st.info("⚠️ Free tier: ~15 requests/minute. Wait if quota exceeded.")
+    st.info("⚠️ Free tier: ~15 requests/minute")
     
     uploaded_file = st.file_uploader("Upload disaster image", type=['jpg', 'jpeg', 'png'])
     
@@ -757,13 +841,7 @@ elif menu == "📊 Analytics":
         
         m = folium.Map(location=map_center, zoom_start=map_zoom, tiles='CartoDB dark_matter')
         
-        color_map = {
-            'Wildfires': 'red', 
-            'Severe Storms': 'orange', 
-            'Floods': 'blue', 
-            'Earthquakes': 'darkred',
-            'Volcanoes': 'red'
-        }
+        color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 'Earthquakes': 'darkred', 'Volcanoes': 'red'}
         
         for _, disaster in filtered_disasters.iterrows():
             popup_text = f"<b>{disaster['title']}</b><br>{disaster['category']}"
@@ -821,7 +899,6 @@ elif menu == "📊 Analytics":
     else:
         st.warning("⚠️ No disasters found in your area. Try adjusting the radius or switch to Global view.")
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: gray;'>
