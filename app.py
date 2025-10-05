@@ -1,12 +1,3 @@
-"""
-AI-RescueMap 🌍
-Professional NASA Space Apps Challenge 2025 Submission
-Real-time disaster response platform with REAL AI-powered insights using Google Gemini
-
-Author: Your Team Name
-Challenge: [Your Challenge Name]
-"""
-
 import os
 import streamlit as st
 import requests
@@ -16,15 +7,12 @@ from streamlit_folium import st_folium
 from folium.plugins import HeatMap, MarkerCluster
 import numpy as np
 from datetime import datetime, timedelta
-import json
-from PIL import Image
-import io
-import base64
+import rasterio
+from rasterio.windows import from_bounds
+from io import BytesIO
 
-# Fix for permission issues
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
 
-# Google Gemini Integration
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -32,9 +20,6 @@ except ImportError:
     GEMINI_AVAILABLE = False
     st.warning("⚠️ Install Google Generative AI: pip install google-generativeai")
 
-# -----------------------------
-# Page Configuration
-# -----------------------------
 st.set_page_config(
     page_title="AI-RescueMap | NASA Space Apps 2025",
     page_icon="🌍",
@@ -42,7 +27,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -83,25 +67,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------
-# Configuration
-# -----------------------------
 CONFIG = {
     "EONET_API": "https://eonet.gsfc.nasa.gov/api/v3/events",
     "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",
     "IPAPI_URL": "https://ipapi.co/json/",
-    "WORLDPOP_YEAR": 2024
+    "WORLDPOP_URL": "https://huggingface.co/datasets/HasnainAtif/worldpop_2024/resolve/main/global_pop_2024_CN_1km_R2025A_UA_v1.tif"
 }
 
-# -----------------------------
-# Gemini AI Setup
-# -----------------------------
 def setup_gemini(api_key: str = None):
-    """Configure Google Gemini AI"""
     if not GEMINI_AVAILABLE:
         return None
     
-    # Try to get API key from secrets, parameter, or environment
     key = api_key or st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
     
     if key:
@@ -113,13 +89,8 @@ def setup_gemini(api_key: str = None):
             return None
     return None
 
-# -----------------------------
-# Utility Functions
-# -----------------------------
-
 @st.cache_data(ttl=3600)
 def get_user_location():
-    """Detect user location via IP"""
     try:
         response = requests.get(CONFIG["IPAPI_URL"], timeout=5)
         data = response.json()
@@ -135,7 +106,6 @@ def get_user_location():
 
 @st.cache_data(ttl=1800)
 def fetch_nasa_eonet_disasters(status="open", limit=50):
-    """Fetch REAL-TIME disaster events from NASA EONET API"""
     try:
         url = f"{CONFIG['EONET_API']}?status={status}&limit={limit}"
         response = requests.get(url, timeout=10)
@@ -167,7 +137,6 @@ def fetch_nasa_eonet_disasters(status="open", limit=50):
         return pd.DataFrame()
 
 def add_nasa_satellite_layers(folium_map, selected_layers):
-    """Add multiple NASA GIBS satellite layers"""
     date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
     layers_config = {
@@ -196,8 +165,50 @@ def add_nasa_satellite_layers(folium_map, selected_layers):
     
     return folium_map
 
-def generate_enhanced_population_data(center_lat, center_lon, radius_deg=2.0, num_points=1000):
-    """Enhanced synthetic population with realistic urban patterns"""
+@st.cache_data(ttl=7200)
+def fetch_worldpop_data(center_lat, center_lon, radius_deg=2.0):
+    try:
+        with st.spinner("📥 Fetching real WorldPop data..."):
+            response = requests.get(CONFIG["WORLDPOP_URL"], stream=True, timeout=30)
+            response.raise_for_status()
+            
+            with rasterio.open(BytesIO(response.content)) as src:
+                min_lon = center_lon - radius_deg
+                max_lon = center_lon + radius_deg
+                min_lat = center_lat - radius_deg
+                max_lat = center_lat + radius_deg
+                
+                window = from_bounds(min_lon, min_lat, max_lon, max_lat, src.transform)
+                
+                data = src.read(1, window=window)
+                
+                height, width = data.shape
+                lats = np.linspace(max_lat, min_lat, height)
+                lons = np.linspace(min_lon, max_lon, width)
+                
+                lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
+                
+                mask = (data > 0) & (data < 1e10)
+                
+                sample_rate = max(1, len(mask.flatten()) // 2000)
+                
+                pop_data = []
+                for i in range(0, height, sample_rate):
+                    for j in range(0, width, sample_rate):
+                        if mask[i, j]:
+                            pop_data.append({
+                                'lat': lat_grid[i, j],
+                                'lon': lon_grid[i, j],
+                                'population': float(data[i, j])
+                            })
+                
+                return pd.DataFrame(pop_data)
+    
+    except Exception as e:
+        st.warning(f"WorldPop data unavailable: {e}. Using fallback data.")
+        return generate_fallback_population_data(center_lat, center_lon, radius_deg)
+
+def generate_fallback_population_data(center_lat, center_lon, radius_deg=2.0, num_points=1000):
     np.random.seed(42)
     
     num_centers = np.random.randint(2, 5)
@@ -228,7 +239,6 @@ def generate_enhanced_population_data(center_lat, center_lon, radius_deg=2.0, nu
     return pd.DataFrame({'lat': lats, 'lon': lons, 'population': populations})
 
 def calculate_disaster_impact(disaster_df, population_df, radius_km=50):
-    """Calculate population at risk based on disaster locations"""
     if disaster_df.empty or population_df.empty:
         return {}
     
@@ -254,14 +264,7 @@ def calculate_disaster_impact(disaster_df, population_df, radius_km=50):
     
     return impacts
 
-# -----------------------------
-# REAL AI Functions using Gemini
-# -----------------------------
-
 def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model) -> str:
-    """
-    REAL AI-powered disaster guidance using Google Gemini
-    """
     if not model:
         return """
 ⚠️ **AI Not Available**
@@ -327,10 +330,7 @@ Keep it concise, clear, and focused on saving lives. Use simple language suitabl
 - 🆘 FEMA: 1-800-621-3362
         """
 
-def analyze_disaster_image(image: Image.Image, model) -> dict:
-    """
-    REAL AI-powered image analysis using Google Gemini Vision
-    """
+def analyze_disaster_image(image, model) -> dict:
     if not model:
         return {
             'success': False,
@@ -377,9 +377,8 @@ Be specific, factual, and focused on actionable intelligence for emergency respo
 
         response = model.generate_content([prompt, image])
         
-        # Parse severity from response
         severity_map = {'LOW': 25, 'MODERATE': 50, 'HIGH': 75, 'CRITICAL': 95}
-        severity_score = 50  # default
+        severity_score = 50
         
         for level, score in severity_map.items():
             if level in response.text.upper():
@@ -400,25 +399,18 @@ Be specific, factual, and focused on actionable intelligence for emergency respo
             'message': f'Analysis failed: {str(e)}'
         }
 
-# -----------------------------
-# SESSION STATE
-# -----------------------------
 if 'location' not in st.session_state:
     st.session_state.location = get_user_location()
 
 if 'gemini_model' not in st.session_state:
     st.session_state.gemini_model = None
 
-# -----------------------------
-# SIDEBAR
-# -----------------------------
 with st.sidebar:
     st.image("https://www.nasa.gov/sites/default/files/thumbnails/image/nasa-logo-web-rgb.png", width=200)
     st.markdown("## 🌍 AI-RescueMap")
     st.markdown("**NASA Space Apps 2025**")
     st.markdown("---")
     
-    # Gemini API Setup
     st.markdown("### 🤖 AI Configuration")
     
     gemini_api_key = st.text_input(
@@ -470,19 +462,12 @@ with st.sidebar:
     - ✅ NASA EONET (Live)
     - ✅ NASA GIBS (Live)
     - ✅ Google Gemini AI
-    - 🔄 WorldPop (Demo)
+    - ✅ WorldPop (Real Data)
     """)
-
-# -----------------------------
-# MAIN APP
-# -----------------------------
 
 st.markdown('<h1 class="main-header">AI-RescueMap 🌍</h1>', unsafe_allow_html=True)
 st.markdown("### Real-time disaster monitoring with AI-powered insights using NASA data & Google Gemini")
 
-# =============================
-# 1. DISASTER MAP
-# =============================
 if menu == "🗺 Disaster Map":
     
     with st.spinner("🛰 Fetching real-time disaster data from NASA EONET..."):
@@ -546,20 +531,19 @@ if menu == "🗺 Disaster Map":
             m = add_nasa_satellite_layers(m, satellite_layers)
         
         if show_population:
-            with st.spinner("Generating population density..."):
-                pop_df = generate_enhanced_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
-                
-                if not pop_df.empty:
-                    heat_data = [[row['lat'], row['lon'], row['population']] 
-                                for _, row in pop_df.iterrows()]
-                    HeatMap(
-                        heat_data,
-                        radius=15,
-                        blur=25,
-                        max_zoom=13,
-                        gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'},
-                        name='Population Density'
-                    ).add_to(m)
+            pop_df = fetch_worldpop_data(center_lat, center_lon, radius_deg=3)
+            
+            if not pop_df.empty:
+                heat_data = [[row['lat'], row['lon'], row['population']] 
+                            for _, row in pop_df.iterrows()]
+                HeatMap(
+                    heat_data,
+                    radius=15,
+                    blur=25,
+                    max_zoom=13,
+                    gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'},
+                    name='Population Density'
+                ).add_to(m)
         
         if show_disasters and not disasters.empty:
             marker_cluster = MarkerCluster(name='Disasters').add_to(m)
@@ -602,7 +586,7 @@ if menu == "🗺 Disaster Map":
         folium.LayerControl().add_to(m)
         st_folium(m, width=1000, height=600)
     
-    if show_disasters and show_population and not disasters.empty and not pop_df.empty:
+    if show_disasters and show_population and not disasters.empty and 'pop_df' in locals() and not pop_df.empty:
         st.markdown("---")
         st.markdown("### 📊 Population Impact Analysis")
         
@@ -634,9 +618,6 @@ if menu == "🗺 Disaster Map":
                 st.metric("Critical Events", len(impact_df[impact_df['risk_level'] == 'CRITICAL']))
                 st.metric("Average Impact Radius", f"{impact_radius} km")
 
-# =============================
-# 2. AI GUIDANCE (REAL with Gemini)
-# =============================
 elif menu == "💬 AI Guidance":
     st.markdown("## 💬 AI-Powered Emergency Guidance")
     st.info("🤖 **REAL AI using Google Gemini** - Get instant disaster response advice")
@@ -673,7 +654,6 @@ elif menu == "💬 AI Guidance":
                     st.markdown(guidance)
                     st.markdown('</div>', unsafe_allow_html=True)
                     
-                    # Emergency contacts
                     st.markdown("### 📞 Emergency Contacts")
                     col_a, col_b, col_c = st.columns(3)
                     with col_a:
@@ -714,10 +694,9 @@ elif menu == "💬 AI Guidance":
         - Timeline
         """)
 
-# =============================
-# 3. IMAGE ANALYSIS (REAL with Gemini Vision)
-# =============================
 elif menu == "🖼 Image Analysis":
+    from PIL import Image
+    
     st.markdown("## 🖼 AI-Powered Disaster Image Analysis")
     st.info("🤖 **REAL AI using Google Gemini Vision** - Upload disaster images for instant assessment")
     
@@ -798,9 +777,6 @@ elif menu == "🖼 Image Analysis":
         For comprehensive assessment
         """)
 
-# =============================
-# 4. ANALYTICS DASHBOARD
-# =============================
 elif menu == "📊 Analytics":
     st.markdown("## 📊 Global Disaster Analytics Dashboard")
     
@@ -838,7 +814,6 @@ elif menu == "📊 Analytics":
         
         st.markdown("---")
         
-        # Map view of all disasters
         st.markdown("### 🌐 Global Disaster Distribution")
         
         m_global = folium.Map(location=[20, 0], zoom_start=2, tiles='CartoDB dark_matter')
@@ -869,7 +844,6 @@ elif menu == "📊 Analytics":
         st.markdown("---")
         st.markdown("### 📋 All Active Disasters (NASA EONET)")
         
-        # Add filters
         col_filter1, col_filter2 = st.columns(2)
         with col_filter1:
             selected_category = st.multiselect(
@@ -904,9 +878,6 @@ elif menu == "📊 Analytics":
     else:
         st.error("⚠️ Unable to load disaster data. Please check your internet connection.")
 
-# -----------------------------
-# Footer
-# -----------------------------
 st.markdown("---")
 
 col_footer1, col_footer2, col_footer3 = st.columns(3)
@@ -918,9 +889,7 @@ with col_footer1:
     - ✅ NASA EONET (Live disasters)
     - ✅ NASA GIBS (Satellite imagery)
     - ✅ Google Gemini AI (Real AI)
-    - ✅ WorldPop (Population data)
-    
-    **100% Working - No Placeholders!**
+    - ✅ WorldPop (Real population data)
     """)
 
 with col_footer2:
@@ -936,22 +905,17 @@ with col_footer2:
 with col_footer3:
     st.markdown("### 🏆 NASA Space Apps 2025")
     st.markdown("""
-    **Team:** [Your Team Name]
-    
-    **Challenge:** Disaster Response
-    
     **Tech Stack:**
     - Python, Streamlit, Folium
     - NASA APIs, Google Gemini AI
     - Real-time data processing
-    
-    ⭐ [GitHub](#) | 📧 [Contact](#)
+    - WorldPop population data
     """)
 
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: gray;'>"
-    "Built with ❤️ for NASA Space Apps Challenge 2025 | "
+    "Built for NASA Space Apps Challenge 2025 | "
     "🌍 Making the world safer with AI-powered disaster response | "
     "Powered by NASA Data & Google Gemini AI"
     "</p>",
