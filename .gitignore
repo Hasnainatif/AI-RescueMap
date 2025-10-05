@@ -1,0 +1,60 @@
+# AI-RescueMap .gitignore
+# Prevent committing sensitive data and large files
+
+# ===================================
+# SECRETS & API KEYS - NEVER COMMIT
+# ===================================
+.streamlit/secrets.toml
+*.env
+.env.local
+secrets.json
+api_keys.txt
+
+# ===================================
+# Python
+# ===================================
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ===================================
+# Virtual Environments
+# ===================================
+venv/
+env/
+.venv/
+
+# ===================================
+# Data Files (too large for git)
+# ===================================
+data/*.tif
+data/*.geotiff
+*.csv
+*.xlsx
+
+# ===================================
+# IDE & OS Files
+# ===================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# ===================================
+# Logs & Cache
+# ===================================
+*.log
+.cache/
+.pytest_cache/
+
+# ===================================
+# Temporary Files
+# ===================================
+tmp/
+*.tmp
+*.bak
