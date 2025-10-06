@@ -71,14 +71,45 @@ CONFIG = {
     "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse"
 }
 
-# ✅ FIXED: Geocode city/country to lat/lon
+# ✅ WORLDWIDE EMERGENCY CONTACTS DATABASE
+EMERGENCY_CONTACTS = {
+    "Pakistan": {"emergency": "112 / 1122", "police": "15", "ambulance": "1122", "fire": "16"},
+    "United States": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
+    "United Kingdom": {"emergency": "999 / 112", "police": "999", "ambulance": "999", "fire": "999"},
+    "India": {"emergency": "112", "police": "100", "ambulance": "102", "fire": "101"},
+    "Australia": {"emergency": "000", "police": "000", "ambulance": "000", "fire": "000"},
+    "Canada": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
+    "Germany": {"emergency": "112", "police": "110", "ambulance": "112", "fire": "112"},
+    "France": {"emergency": "112", "police": "17", "ambulance": "15", "fire": "18"},
+    "Japan": {"emergency": "110 / 119", "police": "110", "ambulance": "119", "fire": "119"},
+    "China": {"emergency": "110 / 120", "police": "110", "ambulance": "120", "fire": "119"},
+    "Brazil": {"emergency": "190 / 192", "police": "190", "ambulance": "192", "fire": "193"},
+    "Mexico": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
+    "South Africa": {"emergency": "10111", "police": "10111", "ambulance": "10177", "fire": "10177"},
+    "Italy": {"emergency": "112", "police": "112", "ambulance": "118", "fire": "115"},
+    "Spain": {"emergency": "112", "police": "091", "ambulance": "061", "fire": "080"},
+    "Russia": {"emergency": "112", "police": "102", "ambulance": "103", "fire": "101"},
+    "Saudi Arabia": {"emergency": "112", "police": "999", "ambulance": "997", "fire": "998"},
+    "Turkey": {"emergency": "112", "police": "155", "ambulance": "112", "fire": "110"},
+    "Indonesia": {"emergency": "112", "police": "110", "ambulance": "118", "fire": "113"},
+    "Nigeria": {"emergency": "112", "police": "112", "ambulance": "112", "fire": "112"},
+    # Default for all other countries
+    "Default": {"emergency": "112 (International)", "police": "Local Police", "ambulance": "Local Ambulance", "fire": "Local Fire"}
+}
+
+def get_emergency_contacts(country: str) -> dict:
+    """Get emergency contacts for a specific country"""
+    return EMERGENCY_CONTACTS.get(country, EMERGENCY_CONTACTS["Default"])
+
+# ✅ FIXED: Geocode with proper error handling
 def geocode_location(city_or_address: str):
-    """Convert city name or address to lat/lon using OpenStreetMap Nominatim."""
+    """Convert city/address to coordinates - Works worldwide!"""
     try:
         params = {
             'q': city_or_address,
             'format': 'json',
-            'limit': 1
+            'limit': 1,
+            'addressdetails': 1
         }
         headers = {'User-Agent': 'AI-RescueMap/1.0 (NASA Space Apps 2025)'}
         
@@ -87,32 +118,32 @@ def geocode_location(city_or_address: str):
         
         if data and len(data) > 0:
             result = data[0]
-            display_name_parts = result.get('display_name', city_or_address).split(',')
+            address = result.get('address', {})
             
             return {
                 'lat': float(result['lat']),
                 'lon': float(result['lon']),
-                'city': display_name_parts[0].strip() if len(display_name_parts) > 0 else 'Unknown',
-                'country': display_name_parts[-1].strip() if len(display_name_parts) > 0 else 'Unknown',
-                'region': display_name_parts[1].strip() if len(display_name_parts) > 1 else 'Unknown',
+                'city': address.get('city') or address.get('town') or address.get('village') or result.get('display_name', '').split(',')[0],
+                'country': address.get('country', 'Unknown'),
+                'region': address.get('state') or address.get('region', 'Unknown'),
                 'full_address': result.get('display_name', city_or_address),
                 'method': 'manual',
-                'source': 'Geocoded (Manual Entry)'
+                'source': 'Geocoded'
             }
-        else:
-            return None
+        return None
     except Exception as e:
-        st.error(f"❌ Geocoding failed: {e}")
+        st.error(f"❌ Geocoding error: {e}")
         return None
 
-# ✅ FIXED: Reverse geocode lat/lon to address
+# ✅ FIXED: Reverse geocode from lat/lon
 def reverse_geocode(lat: float, lon: float):
-    """Convert lat/lon to address using OpenStreetMap Nominatim."""
+    """Convert coordinates to address"""
     try:
         params = {
             'lat': lat,
             'lon': lon,
-            'format': 'json'
+            'format': 'json',
+            'addressdetails': 1
         }
         headers = {'User-Agent': 'AI-RescueMap/1.0 (NASA Space Apps 2025)'}
         
@@ -121,161 +152,85 @@ def reverse_geocode(lat: float, lon: float):
         
         if data and 'address' in data:
             address = data['address']
-            display_name_parts = data.get('display_name', '').split(',')
-            
             return {
                 'lat': lat,
                 'lon': lon,
-                'city': address.get('city') or address.get('town') or address.get('village') or display_name_parts[0].strip(),
+                'city': address.get('city') or address.get('town') or address.get('village', 'Unknown'),
                 'country': address.get('country', 'Unknown'),
-                'region': address.get('state') or address.get('region') or 'Unknown',
+                'region': address.get('state') or address.get('region', 'Unknown'),
                 'full_address': data.get('display_name', f"{lat}, {lon}"),
                 'method': 'browser',
-                'source': 'GPS (Browser Location)'
+                'source': 'Browser GPS'
             }
-        else:
-            return None
+        return None
     except Exception as e:
         st.warning(f"⚠️ Reverse geocoding failed: {e}")
         return None
 
-# ✅ FIXED: Get location from IP (fallback only)
+# ✅ FIXED: IP-based fallback location
 def get_ip_location():
-    """Get approximate location from IP address (fallback method)"""
+    """Get location from IP (fallback only)"""
     try:
         response = requests.get(CONFIG["IPAPI_URL"], timeout=5)
         data = response.json()
         
-        if 'error' in data and data['error']:
-            raise Exception(f"API error: {data.get('reason', 'Unknown')}")
-        
-        if 'latitude' not in data or 'longitude' not in data:
-            raise KeyError("Missing coordinates")
-        
-        return {
-            'lat': float(data['latitude']),
-            'lon': float(data['longitude']),
-            'city': data.get('city', 'Unknown'),
-            'country': data.get('country_name', 'Unknown'),
-            'region': data.get('region', 'Unknown'),
-            'ip': data.get('ip', 'Unknown'),
-            'org': data.get('org', ''),
-            'method': 'ip',
-            'source': 'IP Geolocation (Fallback)'
-        }
-    except Exception as e:
-        try:
-            alt_response = requests.get(CONFIG["IPAPI_BACKUP"], timeout=5)
-            alt_data = alt_response.json()
-            
-            if alt_data.get('status') != 'success':
-                raise Exception(f"Backup failed: {alt_data.get('message', 'Unknown')}")
-            
+        if 'error' not in data and 'latitude' in data:
             return {
-                'lat': float(alt_data['lat']),
-                'lon': float(alt_data['lon']),
-                'city': alt_data.get('city', 'Unknown'),
-                'country': alt_data.get('country', 'Unknown'),
-                'region': alt_data.get('regionName', 'Unknown'),
-                'ip': alt_data.get('query', 'Unknown'),
-                'org': alt_data.get('isp', ''),
+                'lat': float(data['latitude']),
+                'lon': float(data['longitude']),
+                'city': data.get('city', 'Unknown'),
+                'country': data.get('country_name', 'Unknown'),
+                'region': data.get('region', 'Unknown'),
+                'ip': data.get('ip', 'Unknown'),
                 'method': 'ip',
                 'source': 'IP Geolocation (Fallback)'
             }
-        except Exception as backup_error:
-            st.warning(f"⚠️ IP location failed: {backup_error}")
-            return None
-
-# ✅ NEW: Get emergency contacts by country
-def get_emergency_contacts(country: str):
-    """Return emergency contact numbers based on country"""
-    emergency_db = {
-        'Pakistan': {
-            'emergency': '112',
-            'police': '15',
-            'ambulance': '115 / 1122',
-            'fire': '16',
-            'rescue': '1122'
-        },
-        'United States': {
-            'emergency': '911',
-            'police': '911',
-            'ambulance': '911',
-            'fire': '911',
-            'fema': '1-800-621-3362'
-        },
-        'India': {
-            'emergency': '112',
-            'police': '100',
-            'ambulance': '102',
-            'fire': '101',
-            'disaster': '108'
-        },
-        'United Kingdom': {
-            'emergency': '999 / 112',
-            'police': '999',
-            'ambulance': '999',
-            'fire': '999'
-        },
-        'Australia': {
-            'emergency': '000',
-            'police': '000',
-            'ambulance': '000',
-            'fire': '000'
-        },
-        'Japan': {
-            'emergency': '110 (Police) / 119 (Fire)',
-            'police': '110',
-            'ambulance': '119',
-            'fire': '119'
-        },
-        'Germany': {
-            'emergency': '112',
-            'police': '110',
-            'ambulance': '112',
-            'fire': '112'
-        },
-        'France': {
-            'emergency': '112',
-            'police': '17',
-            'ambulance': '15',
-            'fire': '18'
-        },
-        'China': {
-            'emergency': '110 (Police) / 120 (Medical)',
-            'police': '110',
-            'ambulance': '120',
-            'fire': '119'
-        },
-        'Brazil': {
-            'emergency': '190 (Police) / 192 (Medical)',
-            'police': '190',
-            'ambulance': '192',
-            'fire': '193'
-        },
-        'Canada': {
-            'emergency': '911',
-            'police': '911',
-            'ambulance': '911',
-            'fire': '911'
-        },
-        'Mexico': {
-            'emergency': '911',
-            'police': '911',
-            'ambulance': '911',
-            'fire': '911'
-        }
-    }
+    except:
+        pass
     
-    # Return country-specific or default European 112
-    return emergency_db.get(country, {
-        'emergency': '112',
-        'police': 'Local Police',
-        'ambulance': 'Local Ambulance',
-        'fire': 'Local Fire'
-    })
+    # Try backup
+    try:
+        response = requests.get(CONFIG["IPAPI_BACKUP"], timeout=5)
+        data = response.json()
+        
+        if data.get('status') == 'success':
+            return {
+                'lat': float(data['lat']),
+                'lon': float(data['lon']),
+                'city': data.get('city', 'Unknown'),
+                'country': data.get('country', 'Unknown'),
+                'region': data.get('regionName', 'Unknown'),
+                'ip': data.get('query', 'Unknown'),
+                'method': 'ip',
+                'source': 'IP Geolocation (Fallback)'
+            }
+    except:
+        pass
+    
+    # Last resort fallback
+    return {
+        'lat': 20.0,
+        'lon': 0.0,
+        'city': 'Unknown',
+        'country': 'Unknown',
+        'region': 'Unknown',
+        'method': 'default',
+        'source': 'Default Location'
+    }
 
-# ✅ FIXED: Gemini setup
+# ✅ FIXED: Get current location with priority system
+def get_current_location():
+    """Priority: Browser GPS > Manual > IP Fallback"""
+    if st.session_state.get('browser_location'):
+        return st.session_state.browser_location
+    elif st.session_state.get('manual_location'):
+        return st.session_state.manual_location
+    elif st.session_state.get('ip_location'):
+        return st.session_state.ip_location
+    else:
+        return get_ip_location()
+
+# ✅ Gemini setup (unchanged)
 def setup_gemini(api_key: str = None, model_type: str = "text"):
     if not GEMINI_AVAILABLE:
         return None
@@ -285,26 +240,24 @@ def setup_gemini(api_key: str = None, model_type: str = "text"):
     if key:
         try:
             genai.configure(api_key=key)
-            
             model_map = {
                 "text": "gemini-2.0-flash-exp",
                 "image": "gemini-2.0-flash-exp",
                 "chat": "gemini-2.0-flash-exp"
             }
-            
             model_name = model_map.get(model_type, "gemini-2.0-flash-exp")
             return genai.GenerativeModel(model_name)
         except Exception as e:
-            st.error(f"❌ Gemini setup error: {e}")
+            st.error(f"Gemini setup error: {e}")
             return None
     return None
 
+# ✅ FIXED: Fetch disasters worldwide (not just US)
 @st.cache_data(ttl=1800)
-def fetch_nasa_eonet_disasters(status="open", limit=300):
-    """Fetch real-time disaster data from NASA EONET"""
+def fetch_nasa_eonet_disasters(status="open", limit=500):  # Increased limit
     try:
         url = f"{CONFIG['EONET_API']}?status={status}&limit={limit}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=15)
         response.raise_for_status()
         data = response.json()
         
@@ -315,14 +268,22 @@ def fetch_nasa_eonet_disasters(status="open", limit=300):
                 coords = latest_geo.get('coordinates', [])
                 
                 if len(coords) >= 2:
+                    # Handle both Point and Polygon geometries
+                    if latest_geo['type'] == 'Point':
+                        lat, lon = coords[1], coords[0]
+                    elif latest_geo['type'] == 'Polygon' and len(coords[0]) > 0:
+                        lat, lon = coords[0][0][1], coords[0][0][0]
+                    else:
+                        continue
+                    
                     disasters.append({
                         'id': event['id'],
                         'title': event['title'],
                         'category': event['categories'][0]['title'] if event.get('categories') else 'Unknown',
-                        'lat': coords[1] if latest_geo['type'] == 'Point' else coords[0][1],
-                        'lon': coords[0] if latest_geo['type'] == 'Point' else coords[0][0],
+                        'lat': lat,
+                        'lon': lon,
                         'date': event.get('geometry')[-1].get('date', 'Unknown'),
-                        'source': ', '.join([s['id'] for s in event.get('sources', [])]),
+                        'source': ', '.join([s['id'] for s in event.get('sources', [])[:3]]),
                         'link': event.get('link', '')
                     })
         
@@ -348,8 +309,12 @@ def add_nasa_satellite_layers(folium_map, selected_layers):
     
     return folium_map
 
+# ✅ FIXED: Population data generation (no ValueError)
 def generate_population_data(center_lat, center_lon, radius_deg=2.0, num_points=1000):
-    np.random.seed(int(center_lat * 1000 + center_lon * 1000))  # Unique seed per location
+    # Use absolute value and modulo to ensure valid seed
+    seed_value = abs(int((center_lat * 1000 + center_lon * 1000))) % (2**31)
+    np.random.seed(seed_value)
+    
     num_centers = np.random.randint(2, 5)
     centers = [(center_lat + np.random.uniform(-radius_deg*0.7, radius_deg*0.7),
                 center_lon + np.random.uniform(-radius_deg*0.7, radius_deg*0.7),
@@ -402,67 +367,79 @@ def calculate_disaster_impact(disaster_df, population_df, radius_km=50):
         })
     return impacts
 
-# ✅ FIXED: AI Guidance with optional location-based response
+# ✅ FIXED: AI Guidance with location-based option
 def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use_location: bool = False, location: dict = None) -> str:
     if not model:
-        return """⚠️ **AI Not Available** - Please add your Gemini API key in Settings."""
+        return """⚠️ **AI Not Available** - Please add your Gemini API key in settings."""
     
     try:
         location_context = ""
-        if use_location and location:
-            location_context = f"\n\nUser Location: {location['city']}, {location['region']}, {location['country']}"
+        emergency_numbers = ""
         
-        prompt = f"""You are an emergency disaster response expert. Someone needs immediate help.
+        if use_location and location:
+            location_context = f"\n\n**USER LOCATION:** {location['city']}, {location['country']}"
+            contacts = get_emergency_contacts(location['country'])
+            emergency_numbers = f"""
 
-Disaster Type: {disaster_type}
-User Situation: {user_situation}{location_context}
+📞 **EMERGENCY CONTACTS FOR {location['country'].upper()}:**
+🚨 Emergency: {contacts['emergency']}
+👮 Police: {contacts['police']}
+🚑 Ambulance: {contacts['ambulance']}
+🚒 Fire: {contacts['fire']}
+"""
+        
+        prompt = f"""You are an emergency disaster response expert. Provide IMMEDIATE, life-saving guidance.
 
-Provide IMMEDIATE, ACTIONABLE guidance in this EXACT format:
+**DISASTER TYPE:** {disaster_type}
+**SITUATION:** {user_situation}{location_context}
 
-🚨 IMMEDIATE ACTIONS:
-[List 3-5 specific life-saving steps]
+Provide clear, actionable advice:
 
-⚠️ CRITICAL DON'Ts:
-[List 3-4 dangerous actions to AVOID]
+🚨 **IMMEDIATE ACTIONS:**
+[3-5 critical steps to take RIGHT NOW]
 
-🏃 EVACUATION CRITERIA:
-[Clear criteria for when to evacuate NOW]
+⚠️ **CRITICAL DON'Ts:**
+[3-4 dangerous actions to AVOID]
 
-📦 ESSENTIAL ITEMS:
-[Critical supplies to gather if time permits]
+🏃 **EVACUATION CRITERIA:**
+[When to leave immediately vs shelter in place]
 
-⏰ URGENCY LEVEL:
-[State: MINUTES / HOURS / DAYS with brief explanation]
+📦 **ESSENTIAL ITEMS:**
+[Critical supplies to gather if possible]
 
-Keep response focused, clear, and actionable. DO NOT include emergency contact numbers in your response."""
+⏰ **URGENCY LEVEL:**
+[Immediate (minutes) / Urgent (hours) / Plan (days)]
+
+Be concise and life-saving focused. NO extra commentary."""
 
         response = model.generate_content(prompt)
-        return response.text
+        
+        return response.text + emergency_numbers
+        
     except Exception as e:
-        return f"""⚠️ **AI Error:** {str(e)[:200]}
+        return f"""⚠️ **AI Error:** {str(e)}
 
 **Basic Safety Steps:**
 1. 🚨 Call emergency services immediately
 2. 🏃 Follow official evacuation orders
-3. 🏠 Move to safest available location
-4. 📻 Stay informed via local emergency broadcasts"""
+3. 📻 Stay informed via local news/radio
+4. 🆘 Move to safe location if threatened"""
 
 def analyze_disaster_image(image, model, max_retries=2) -> dict:
     if not model:
-        return {'success': False, 'message': '⚠️ Please add Gemini API key in Settings'}
+        return {'success': False, 'message': 'Please add Gemini API key'}
     
-    prompt = """Analyze this disaster image as an expert emergency assessor.
+    prompt = """Analyze this disaster image as an expert assessor.
 
-Provide a detailed assessment in this EXACT format:
-
-**DISASTER TYPE:** [Specific type]
-**SEVERITY:** [LOW/MODERATE/HIGH/CRITICAL with reasoning]
-**VISIBLE DAMAGES:** [Detailed list]
-**AFFECTED AREA:** [Size estimate]
-**POPULATION RISK:** [Assessment of human danger]
-**IMMEDIATE CONCERNS:** [Top 3 urgent issues]
-**RESPONSE RECOMMENDATIONS:** [Specific actions needed]
-**RECOVERY TIME:** [Short/Medium/Long-term estimate]"""
+Provide:
+**DISASTER TYPE:** [Type]
+**SEVERITY:** [LOW/MODERATE/HIGH/CRITICAL and why]
+**VISIBLE DAMAGES:** [List]
+**AFFECTED AREA:** [Estimate]
+**POPULATION RISK:** [Assessment]
+**IMMEDIATE CONCERNS:** [Top 3]
+**RESPONSE RECOMMENDATIONS:** [Actions needed]
+**RECOVERY TIME:** [Short/Medium/Long-term]"""
 
     for attempt in range(max_retries):
         try:
@@ -495,19 +472,16 @@ Provide a detailed assessment in this EXACT format:
                         'success': False,
                         'message': f"""⚠️ **Rate Limit Exceeded**
 
-Free tier quota reached. Please:
-1. ⏰ Wait 2-3 minutes before retrying
-2. 🔄 Reduce request frequency (15/min limit)
-3. 💳 Consider upgrading at https://ai.google.dev
+Free tier quota hit. Please wait 2-3 minutes and try again.
 
 Error: {error_msg[:200]}"""
                     }
             else:
-                return {'success': False, 'message': f'❌ Analysis failed: {error_msg[:300]}'}
+                return {'success': False, 'message': f'Analysis failed: {error_msg[:300]}'}
     
-    return {'success': False, 'message': '❌ Maximum retries exceeded'}
+    return {'success': False, 'message': 'Max retries exceeded'}
 
-# ✅ FIXED: Session state initialization
+# ========== SESSION STATE INITIALIZATION ==========
 if 'browser_location' not in st.session_state:
     st.session_state.browser_location = None
 
@@ -523,41 +497,34 @@ if 'gemini_model_text' not in st.session_state:
 if 'gemini_model_image' not in st.session_state:
     st.session_state.gemini_model_image = None
 
-# ✅ NEW: Function to get current active location (priority order)
-def get_current_location():
-    """Priority: Browser GPS > Manual Entry > IP Fallback"""
-    if st.session_state.browser_location:
-        return st.session_state.browser_location  # Highest priority
-    elif st.session_state.manual_location:
-        return st.session_state.manual_location   # Second priority
-    else:
-        return st.session_state.ip_location       # Fallback
-
-# Get active location
-loc = get_current_location()
-
-# ✅ FIXED: Sidebar with working browser location
+# ========== SIDEBAR ==========
 with st.sidebar:
     st.image("https://www.nasa.gov/sites/default/files/thumbnails/image/nasa-logo-web-rgb.png", width=180)
     st.markdown("## 🌍 AI-RescueMap")
     st.markdown("---")
     
-    menu = st.radio("📍 Navigation", ["🗺 Disaster Map", "💬 AI Guidance", "🖼 Image Analysis", "📊 Analytics"])
+    menu = st.radio("Navigation", ["🗺 Disaster Map", "💬 AI Guidance", "🖼 Image Analysis", "📊 Analytics"])
     
     st.markdown("---")
     st.markdown("### 🎯 Your Location")
     
+    # Get current active location
+    loc = get_current_location()
+    
     if loc:
-        # Display location badge
+        # Show location badge
         if loc.get('method') == 'browser':
-            badge = "📍 GPS (Most Accurate)"
+            badge = "🌐 Browser GPS"
             badge_color = "green"
         elif loc.get('method') == 'manual':
-            badge = "📝 Manual Entry"
+            badge = "📍 Manual Entry"
             badge_color = "blue"
-        else:
-            badge = "🌍 IP-Based (Less Accurate)"
+        elif loc.get('method') == 'ip':
+            badge = "🌐 IP-Based (Less Accurate)"
             badge_color = "orange"
+        else:
+            badge = "📍 Default"
+            badge_color = "gray"
         
         st.success(f"**{loc['city']}, {loc['region']}**")
         st.info(f"🌍 {loc['country']}")
@@ -565,84 +532,67 @@ with st.sidebar:
         
         with st.expander("ℹ️ Location Details"):
             st.caption(f"**Coordinates:** {loc['lat']:.4f}, {loc['lon']:.4f}")
-            st.caption(f"**Method:** {loc['method'].upper()}")
+            st.caption(f"**Method:** {loc.get('method', 'Unknown').title()}")
             st.caption(f"**Source:** {loc.get('source', 'Unknown')}")
             if loc.get('ip'):
                 st.caption(f"**IP:** {loc.get('ip', 'N/A')}")
     else:
         st.error("❌ Location unavailable")
     
+    # ✅ BROWSER GPS LOCATION (Real-time with permission)
     st.markdown("---")
-    st.markdown("### 📍 Location Options")
+    st.markdown("### 🌐 Get My Location")
+    st.caption("📍 Uses your device's GPS (browser permission required)")
     
-    # ✅ FIXED: Browser GPS Location (Priority 1)
-    st.markdown("#### 🌐 Use Browser GPS")
-    st.caption("🎯 Most accurate - uses your device's GPS/Wi-Fi")
-    
-    # JavaScript to get browser location
-    browser_location_html = """
-    <div style="padding: 10px; background: #1e1e1e; border-radius: 5px;">
-        <button id="getLocationBtn" style="
-            width: 100%;
-            padding: 10px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-        ">
-            📍 Get My Location
-        </button>
-        <div id="locationStatus" style="margin-top: 10px; color: #888; font-size: 12px;"></div>
-    </div>
-    
+    # JavaScript for browser geolocation
+    location_html = """
     <script>
-    document.getElementById('getLocationBtn').addEventListener('click', function() {
-        const statusDiv = document.getElementById('locationStatus');
-        statusDiv.innerText = '⏳ Requesting location access...';
-        statusDiv.style.color = '#ffa500';
+    function getLocation() {
+        const button = document.getElementById('gps-btn');
+        const status = document.getElementById('gps-status');
         
         if (!navigator.geolocation) {
-            statusDiv.innerText = '❌ Geolocation not supported by your browser';
-            statusDiv.style.color = '#ff4444';
+            status.innerHTML = '❌ Geolocation not supported';
             return;
         }
         
+        button.disabled = true;
+        button.innerHTML = '📡 Getting location...';
+        status.innerHTML = '⏳ Requesting permission...';
+        
         navigator.geolocation.getCurrentPosition(
-            function(position) {
+            (position) => {
                 const lat = position.coords.latitude;
                 const lon = position.coords.longitude;
-                const accuracy = position.coords.accuracy;
+                const acc = position.coords.accuracy;
                 
-                statusDiv.innerText = '✅ Location obtained! Reloading...';
-                statusDiv.style.color = '#44ff44';
-                
-                // Redirect with lat/lon as query params
+                // Send to Streamlit via query params
                 const url = new URL(window.location.href);
-                url.searchParams.set('browser_lat', lat);
-                url.searchParams.set('browser_lon', lon);
-                url.searchParams.set('browser_accuracy', accuracy);
+                url.searchParams.set('gps_lat', lat);
+                url.searchParams.set('gps_lon', lon);
+                url.searchParams.set('gps_acc', acc);
+                url.searchParams.set('gps_timestamp', Date.now());
                 window.location.href = url.toString();
             },
-            function(error) {
-                let errorMsg = '';
+            (error) => {
+                button.disabled = false;
+                button.innerHTML = '📍 Get My Location';
+                
+                let msg = '❌ ';
                 switch(error.code) {
                     case error.PERMISSION_DENIED:
-                        errorMsg = '❌ Location access denied. Please allow location access in browser settings.';
+                        msg += 'Permission denied. Please allow location access.';
                         break;
                     case error.POSITION_UNAVAILABLE:
-                        errorMsg = '❌ Location information unavailable.';
+                        msg += 'Location unavailable. Check device settings.';
                         break;
                     case error.TIMEOUT:
-                        errorMsg = '❌ Location request timed out.';
+                        msg += 'Request timeout. Try again.';
                         break;
                     default:
-                        errorMsg = '❌ Unknown error occurred.';
+                        msg += 'Unknown error: ' + error.message;
                 }
-                statusDiv.innerText = errorMsg;
-                statusDiv.style.color = '#ff4444';
+                status.innerHTML = msg;
             },
             {
                 enableHighAccuracy: true,
@@ -650,51 +600,55 @@ with st.sidebar:
                 maximumAge: 0
             }
         );
-    });
+    }
     </script>
+    
+    <button id="gps-btn" onclick="getLocation()" style="
+        width: 100%;
+        padding: 0.5rem 1rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        font-weight: bold;
+        cursor: pointer;
+        font-size: 1rem;
+    ">📍 Get My Location</button>
+    <p id="gps-status" style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;"></p>
     """
     
-    st.components.v1.html(browser_location_html, height=100)
+    st.components.v1.html(location_html, height=120)
     
-    # ✅ Process browser location from query params
+    # Check for GPS data in query params
     query_params = st.query_params
-    if 'browser_lat' in query_params and 'browser_lon' in query_params:
+    if 'gps_lat' in query_params and 'gps_lon' in query_params:
         try:
-            browser_lat = float(query_params['browser_lat'])
-            browser_lon = float(query_params['browser_lon'])
+            gps_lat = float(query_params['gps_lat'])
+            gps_lon = float(query_params['gps_lon'])
+            gps_acc = float(query_params.get('gps_acc', 0))
             
-            # Only update if it's a new location
-            if (not st.session_state.browser_location or 
-                st.session_state.browser_location['lat'] != browser_lat or 
-                st.session_state.browser_location['lon'] != browser_lon):
-                
-                with st.spinner("🔄 Processing GPS location..."):
-                    browser_loc = reverse_geocode(browser_lat, browser_lon)
-                    if browser_loc:
-                        st.session_state.browser_location = browser_loc
-                        # Clear query params and reload
-                        st.query_params.clear()
-                        st.success("✅ GPS location set successfully!")
-                        time.sleep(1)
-                        st.rerun()
+            # Reverse geocode to get address
+            with st.spinner("🌍 Finding your location..."):
+                browser_loc = reverse_geocode(gps_lat, gps_lon)
+                if browser_loc:
+                    st.session_state.browser_location = browser_loc
+                    st.success(f"✅ Location detected: {browser_loc['city']}, {browser_loc['country']}")
+                    st.caption(f"📍 Accuracy: ~{int(gps_acc)}m")
+                    
+                    # Clear query params and rerun
+                    st.query_params.clear()
+                    time.sleep(1)
+                    st.rerun()
         except Exception as e:
-            st.error(f"❌ Error processing browser location: {e}")
+            st.error(f"❌ GPS error: {e}")
+            st.query_params.clear()
     
-    # Clear browser location
-    if st.session_state.browser_location:
-        if st.button("🔄 Clear GPS Location", use_container_width=True):
-            st.session_state.browser_location = None
-            st.success("✅ GPS location cleared. Using fallback.")
-            time.sleep(0.5)
-            st.rerun()
-    
+    # Manual location input
     st.markdown("---")
+    st.markdown("### 📝 Enter Location Manually")
+    st.caption("🌍 Works for any city worldwide")
     
-    # ✅ Manual Location Entry (Priority 2)
-    st.markdown("#### 📝 Manual Entry")
-    st.caption("🌍 Enter any city/country worldwide")
-    
-    with st.expander("🔧 Enter Location Manually"):
+    with st.expander("🔧 Manual Entry"):
         st.info("**Examples:**\n"
                 "- Faisalabad, Pakistan\n"
                 "- New York, USA\n"
@@ -702,10 +656,9 @@ with st.sidebar:
                 "- London, UK")
         
         location_input = st.text_input(
-            "City, Country",
-            value="",
+            "City/Country",
             placeholder="e.g., Faisalabad, Pakistan",
-            help="Enter city and country for accurate results"
+            key="manual_input"
         )
         
         col_btn1, col_btn2 = st.columns(2)
@@ -717,49 +670,46 @@ with st.sidebar:
                         geocoded = geocode_location(location_input)
                         if geocoded:
                             st.session_state.manual_location = geocoded
-                            st.success(f"✅ Found: {geocoded['city']}, {geocoded['country']}")
+                            st.session_state.browser_location = None  # Clear GPS
+                            st.success(f"✅ Found!")
                             time.sleep(1)
                             st.rerun()
                         else:
-                            st.error(f"❌ Could not find '{location_input}'. Try:\n- Add country name\n- Check spelling")
+                            st.error(f"❌ Location not found. Try adding country name.")
         
         with col_btn2:
-            if st.session_state.manual_location and st.button("🗑 Clear", use_container_width=True):
+            if st.session_state.manual_location and st.button("🔄 Reset", use_container_width=True):
                 st.session_state.manual_location = None
-                st.success("✅ Manual location cleared")
+                st.success("✅ Reset to GPS/IP")
                 time.sleep(0.5)
                 st.rerun()
     
-    st.markdown("---")
-    
-    # IP Location refresh (Priority 3 - Fallback)
-    if not st.session_state.browser_location and not st.session_state.manual_location:
-        st.markdown("#### 🌐 IP-Based (Active)")
-        if st.button("🔄 Refresh IP Location", use_container_width=True):
-            with st.spinner("📡 Detecting IP location..."):
-                st.session_state.ip_location = get_ip_location()
-                time.sleep(0.5)
+    # Clear browser location
+    if st.session_state.browser_location:
+        if st.button("🔄 Clear GPS Location", use_container_width=True):
+            st.session_state.browser_location = None
+            st.success("✅ GPS location cleared")
+            time.sleep(0.5)
             st.rerun()
 
-# Main header
+# ========== MAIN HEADER ==========
 st.markdown('<h1 class="main-header">AI-RescueMap 🌍</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Real-time disaster monitoring powered by NASA & AI</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Real-time global disaster monitoring with NASA data & AI</p>', unsafe_allow_html=True)
 
-# Setup Gemini models
+# Setup Gemini
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
 if gemini_api_key:
-    if st.session_state.gemini_model_text is None:
+    if not st.session_state.gemini_model_text:
         st.session_state.gemini_model_text = setup_gemini(gemini_api_key, "text")
-    if st.session_state.gemini_model_image is None:
+    if not st.session_state.gemini_model_image:
         st.session_state.gemini_model_image = setup_gemini(gemini_api_key, "image")
 
-# ========== MAIN MENU CONTENT ==========
-
+# ========== DISASTER MAP ==========
 if menu == "🗺 Disaster Map":
-    with st.spinner("🛰 Fetching real-time NASA EONET disaster data..."):
+    with st.spinner("🛰 Fetching NASA EONET data..."):
         disasters = fetch_nasa_eonet_disasters()
     
-    # ✅ FIXED: Always calculate distances based on current location
+    # Calculate distances if location available
     if loc and not disasters.empty:
         disasters['distance_km'] = disasters.apply(
             lambda row: calculate_distance(loc['lat'], loc['lon'], row['lat'], row['lon']), 
@@ -767,6 +717,7 @@ if menu == "🗺 Disaster Map":
         )
         disasters = disasters.sort_values('distance_km')
     
+    # Metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("🌪 Active Disasters", len(disasters))
@@ -775,7 +726,10 @@ if menu == "🗺 Disaster Map":
             nearby = len(disasters[disasters['distance_km'] < 500])
             st.metric("📍 Nearby (<500km)", nearby)
         else:
-            st.metric("🔥 Most Common", disasters['category'].mode()[0] if not disasters.empty else "N/A")
+            if not disasters.empty:
+                st.metric("🔥 Most Common", disasters['category'].mode()[0] if len(disasters) > 0 else "N/A")
+            else:
+                st.metric("🔥 Most Common", "N/A")
     with col3:
         st.metric("🤖 AI Status", "✅ Online" if st.session_state.gemini_model_text else "⚠️ Offline")
     with col4:
@@ -786,35 +740,34 @@ if menu == "🗺 Disaster Map":
     col_settings, col_map = st.columns([1, 3])
     
     with col_settings:
-        st.markdown("### ⚙️ Map Settings")
+        st.markdown("### ⚙️ Settings")
         
+        # ✅ FIXED: Safe disaster selection
         map_options = ["My Location", "Global View"]
         if not disasters.empty:
-            map_options += disasters['title'].tolist()[:10]
+            disaster_titles = disasters['title'].tolist()[:10]
+            map_options.extend(disaster_titles)
         
-        map_center_option = st.selectbox("📍 Center Map On", map_options)
+        map_center_option = st.selectbox("Center Map", map_options)
         
-        # ✅ FIXED: Proper error handling for map centering
+        # ✅ FIXED: Safe map centering
         if map_center_option == "My Location" and loc:
             center_lat, center_lon, zoom = loc['lat'], loc['lon'], 8
         elif map_center_option == "Global View":
             center_lat, center_lon, zoom = 20, 0, 2
-        elif not disasters.empty and map_center_option != "My Location" and map_center_option != "Global View":
-            try:
-                disaster_row = disasters[disasters['title'] == map_center_option].iloc[0]
-                center_lat, center_lon, zoom = disaster_row['lat'], disaster_row['lon'], 8
-            except (IndexError, KeyError):
-                center_lat, center_lon, zoom = loc['lat'] if loc else 0, loc['lon'] if loc else 0, 2
+        elif not disasters.empty and map_center_option in disasters['title'].values:
+            disaster_row = disasters[disasters['title'] == map_center_option].iloc[0]
+            center_lat, center_lon, zoom = disaster_row['lat'], disaster_row['lon'], 8
         else:
-            center_lat, center_lon, zoom = loc['lat'] if loc else 0, loc['lon'] if loc else 0, 2
+            center_lat, center_lon, zoom = 20, 0, 2
         
-        show_disasters = st.checkbox("🔥 Show Disasters", value=True)
-        show_population = st.checkbox("👥 Show Population Heatmap", value=True)
+        show_disasters = st.checkbox("Show Disasters", value=True)
+        show_population = st.checkbox("Show Population", value=True)
         
-        satellite_layers = st.multiselect("🛰 Satellite Layers", 
+        satellite_layers = st.multiselect("Satellite Layers", 
                                          ['True Color', 'Active Fires', 'Night Lights'], 
                                          default=['True Color'])
-        impact_radius = st.slider("📏 Impact Radius (km)", 10, 200, 50)
+        impact_radius = st.slider("Impact Radius (km)", 10, 200, 50)
     
     with col_map:
         m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles='CartoDB positron')
@@ -831,7 +784,8 @@ if menu == "🗺 Disaster Map":
         if show_disasters and not disasters.empty:
             marker_cluster = MarkerCluster().add_to(m)
             color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 
-                        'Earthquakes': 'darkred', 'Volcanoes': 'red'}
+                        'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
+                        'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
             
             for _, disaster in disasters.iterrows():
                 color = color_map.get(disaster['category'], 'gray')
@@ -857,6 +811,7 @@ if menu == "🗺 Disaster Map":
         folium.LayerControl().add_to(m)
         st_folium(m, width=1000, height=600)
     
+    # Impact Analysis
     if show_disasters and show_population and not disasters.empty and 'pop_df' in locals():
         st.markdown("---")
         st.markdown("### 📊 Population Impact Analysis")
@@ -869,11 +824,14 @@ if menu == "🗺 Disaster Map":
             with col1:
                 st.markdown("#### ⚠️ High Risk Events")
                 high_risk = impact_df[impact_df['risk_level'].isin(['CRITICAL', 'HIGH'])]
-                for _, imp in high_risk.iterrows():
-                    st.markdown(f"""<div class="disaster-alert">
-                    ⚠️ <b>{imp['disaster']}</b><br>
-                    👥 {imp['affected_population']:,} people at risk<br>
-                    🚨 Risk Level: {imp['risk_level']}</div>""", unsafe_allow_html=True)
+                if len(high_risk) > 0:
+                    for _, imp in high_risk.head(5).iterrows():
+                        st.markdown(f"""<div class="disaster-alert">
+                        ⚠️ <b>{imp['disaster'][:50]}</b><br>
+                        👥 {imp['affected_population']:,} people at risk<br>
+                        🚨 Risk Level: {imp['risk_level']}</div>""", unsafe_allow_html=True)
+                else:
+                    st.info("✅ No high-risk events in range")
             
             with col2:
                 st.markdown("#### 📈 Statistics")
@@ -881,37 +839,34 @@ if menu == "🗺 Disaster Map":
                 st.metric("Critical Events", len(impact_df[impact_df['risk_level'] == 'CRITICAL']))
                 st.metric("High Risk Events", len(impact_df[impact_df['risk_level'] == 'HIGH']))
 
+# ========== AI GUIDANCE ==========
 elif menu == "💬 AI Guidance":
     st.markdown("## 💬 AI Emergency Guidance")
     
-    # ✅ FIXED: Optional location-based guidance
+    # ✅ FIXED: Location-based checkbox
     use_location = st.checkbox(
-        "📍 Provide location-specific guidance",
+        "📍 Use my location for context-specific guidance",
         value=False,
-        help="Check this to get emergency contacts and guidance specific to your location"
+        help="Get location-specific emergency numbers and local advice"
     )
     
     if use_location and loc:
-        st.info(f"🎯 **Your Location:** {loc['city']}, {loc['region']}, {loc['country']}")
+        st.info(f"🎯 Using location: **{loc['city']}, {loc['country']}**")
     
-    disaster_type = st.selectbox("🌪 Select Disaster Type", 
-        ["Flood", "Wildfire", "Earthquake", "Hurricane", "Tsunami", "Tornado", "Volcano", 
-         "Landslide", "Drought", "Heat Wave", "Blizzard", "Other"])
+    disaster_type = st.selectbox("Disaster Type", 
+        ["Flood", "Wildfire", "Earthquake", "Hurricane", "Tsunami", "Tornado", "Volcano", "Landslide", "Other"])
     
-    user_situation = st.text_area(
-        "📝 Describe Your Current Situation:",
-        placeholder="Be specific: your exact location, number of people, current conditions, available resources, injuries, immediate dangers...\n\nExample: 'I am trapped on 2nd floor with 3 people, water rising fast, no food, phones working, elderly person with heart condition'",
-        height=150,
-        help="More details = better guidance. Include location if not using location checkbox above."
-    )
+    user_situation = st.text_area("Describe your situation:",
+        placeholder="Be specific: What is happening? Number of people? Current conditions? Available resources?",
+        height=120)
     
-    if st.button("🚨 GET AI GUIDANCE NOW", type="primary", use_container_width=True):
+    if st.button("🚨 GET AI GUIDANCE", type="primary", use_container_width=True):
         if not user_situation:
-            st.error("❌ Please describe your situation first")
+            st.error("❌ Please describe your situation")
         elif not st.session_state.gemini_model_text:
-            st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY in Streamlit secrets")
+            st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY to settings")
         else:
-            with st.spinner("🤖 Analyzing your situation with Gemini AI..."):
+            with st.spinner("🤖 Analyzing with AI..."):
                 guidance = get_ai_disaster_guidance(
                     disaster_type, 
                     user_situation, 
@@ -920,124 +875,53 @@ elif menu == "💬 AI Guidance":
                     location=loc if use_location else None
                 )
                 st.markdown(f'<div class="ai-response">{guidance}</div>', unsafe_allow_html=True)
-                
-                # ✅ FIXED: Show emergency contacts based on location or user input
-                st.markdown("---")
-                st.markdown("### 📞 Emergency Contacts")
-                
-                # Determine which country to show contacts for
-                contact_country = None
-                if use_location and loc:
-                    contact_country = loc['country']
-                else:
-                    # Try to extract country from user situation
-                    situation_lower = user_situation.lower()
-                    country_keywords = {
-                        'pakistan': 'Pakistan',
-                        'usa': 'United States', 'america': 'United States', 'us': 'United States',
-                        'india': 'India',
-                        'uk': 'United Kingdom', 'britain': 'United Kingdom', 'england': 'United Kingdom',
-                        'australia': 'Australia',
-                        'japan': 'Japan',
-                        'germany': 'Germany',
-                        'france': 'France',
-                        'china': 'China',
-                        'brazil': 'Brazil',
-                        'canada': 'Canada',
-                        'mexico': 'Mexico'
-                    }
-                    for keyword, country in country_keywords.items():
-                        if keyword in situation_lower:
-                            contact_country = country
-                            break
-                
-                if contact_country:
-                    contacts = get_emergency_contacts(contact_country)
-                    st.success(f"**📍 Emergency Contacts for {contact_country}:**")
-                    
-                    cols = st.columns(len(contacts))
-                    for idx, (service, number) in enumerate(contacts.items()):
-                        with cols[idx % len(cols)]:
-                            st.error(f"**{service.upper()}**\n\n# {number}")
-                else:
-                    # Show generic international contacts
-                    st.info("**🌍 International Emergency Contacts:**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.error("**EUROPE**\n\n# 112")
-                    with col2:
-                        st.warning("**ASIA (varies)**\n\n# 112 / 911")
-                    with col3:
-                        st.info("**AMERICAS**\n\n# 911")
-                    
-                    st.caption("💡 Specify your country in the situation description for accurate emergency numbers, or check the location checkbox above.")
 
+# ========== IMAGE ANALYSIS ==========
 elif menu == "🖼 Image Analysis":
     from PIL import Image
     
-    st.markdown("## 🖼 AI Disaster Image Analysis")
-    st.info("⚠️ **Note:** Free tier has rate limits (~15 requests/minute). Wait if quota is exceeded.")
+    st.markdown("## 🖼 AI Image Analysis")
+    st.info("⚠️ Free tier: ~15 requests/minute. Wait if quota exceeded.")
     
-    uploaded_file = st.file_uploader(
-        "📤 Upload Disaster Image",
-        type=['jpg', 'jpeg', 'png', 'webp'],
-        help="Upload an image of a disaster scene for AI analysis"
-    )
+    uploaded_file = st.file_uploader("Upload disaster image", type=['jpg', 'jpeg', 'png'])
     
     if uploaded_file:
         image = Image.open(uploaded_file)
+        st.image(image, use_column_width=True)
         
-        col_img, col_info = st.columns([2, 1])
-        
-        with col_img:
-            st.image(image, caption="Uploaded Image", use_container_width=True)
-        
-        with col_info:
-            st.markdown("### 📋 Image Info")
-            st.caption(f"**Format:** {image.format}")
-            st.caption(f"**Size:** {image.size[0]} x {image.size[1]} px")
-            st.caption(f"**Mode:** {image.mode}")
-        
-        if st.button("🔍 ANALYZE IMAGE NOW", type="primary", use_container_width=True):
+        if st.button("🔍 ANALYZE IMAGE", type="primary", use_container_width=True):
             if not st.session_state.gemini_model_image:
-                st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY in Streamlit secrets")
+                st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY to settings")
             else:
-                with st.spinner("🤖 Analyzing image with Gemini AI Vision..."):
+                with st.spinner("🤖 Analyzing image..."):
                     result = analyze_disaster_image(image, st.session_state.gemini_model_image)
                     
                     if result['success']:
                         col_a, col_b, col_c = st.columns(3)
                         with col_a:
-                            st.metric("⚠️ Severity", result['severity_level'])
+                            st.metric("Severity", result['severity_level'])
                         with col_b:
-                            st.metric("📊 Risk Score", f"{result['severity_score']}/100")
+                            st.metric("Risk Score", f"{result['severity_score']}/100")
                         with col_c:
-                            st.metric("✅ Status", "Complete")
+                            st.metric("Status", "✅ Complete")
                         
-                        st.markdown("---")
                         st.markdown(f'<div class="ai-response">{result["analysis"]}</div>', unsafe_allow_html=True)
                     else:
-                        st.error(result.get('message', '❌ Analysis failed'))
+                        st.error(result.get('message', 'Analysis failed'))
 
+# ========== ANALYTICS ==========
 elif menu == "📊 Analytics":
-    st.markdown("## 📊 Disaster Analytics Dashboard")
+    st.markdown("## 📊 Analytics Dashboard")
     
-    # ✅ FIXED: Always use current location
     if loc:
-        view_mode = st.radio(
-            "🔍 View Mode:",
-            ["📍 My Location (Recommended)", "🌍 Global View"],
-            horizontal=True,
-            help="Local view shows disasters near you, Global shows worldwide"
-        )
+        view_mode = st.radio("View Mode:", ["📍 My Location", "🌍 Global View"], horizontal=True)
     else:
         view_mode = "🌍 Global View"
         st.info("ℹ️ Location unavailable - showing global view")
     
-    with st.spinner("🛰 Loading real-time disaster data from NASA..."):
-        disasters = fetch_nasa_eonet_disasters(limit=300)
+    with st.spinner("📡 Loading disaster data..."):
+        disasters = fetch_nasa_eonet_disasters(limit=500)
     
-    # ✅ FIXED: Always recalculate distances with current location
     if not disasters.empty and loc:
         disasters['distance_km'] = disasters.apply(
             lambda row: calculate_distance(loc['lat'], loc['lon'], row['lat'], row['lon']), 
@@ -1045,12 +929,12 @@ elif menu == "📊 Analytics":
         )
     
     if "My Location" in view_mode and loc and not disasters.empty:
-        radius_filter = st.slider("🔍 Show disasters within (km):", 100, 10000, 1000, step=100)
+        radius_filter = st.slider("Show disasters within (km):", 100, 5000, 1000, step=100)
         filtered_disasters = disasters[disasters['distance_km'] <= radius_filter].copy()
-        st.success(f"📍 Showing **{len(filtered_disasters)}** disasters within **{radius_filter} km** of **{loc['city']}, {loc['country']}**")
+        st.success(f"📍 Showing {len(filtered_disasters)} disasters within {radius_filter} km of **{loc['city']}, {loc['country']}**")
     else:
         filtered_disasters = disasters
-        st.info(f"🌍 Showing all **{len(filtered_disasters)}** global disasters")
+        st.info(f"🌍 Showing all {len(filtered_disasters)} global disasters")
     
     if not filtered_disasters.empty:
         col1, col2, col3, col4 = st.columns(4)
@@ -1070,7 +954,7 @@ elif menu == "📊 Analytics":
         
         col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown("### 📊 Disasters by Category")
+            st.markdown("### 📊 By Category")
             category_counts = filtered_disasters['category'].value_counts()
             st.bar_chart(category_counts)
         
@@ -1086,7 +970,7 @@ elif menu == "📊 Analytics":
         
         st.markdown("---")
         
-        st.markdown(f"### 🗺 {'Local' if 'My Location' in view_mode else 'Global'} Disaster Distribution")
+        st.markdown(f"### 🗺 {'Local' if 'My Location' in view_mode else 'Global'} Distribution")
         
         map_center = [loc['lat'], loc['lon']] if loc and "My Location" in view_mode else [20, 0]
         map_zoom = 6 if "My Location" in view_mode else 2
@@ -1094,13 +978,15 @@ elif menu == "📊 Analytics":
         m = folium.Map(location=map_center, zoom_start=map_zoom, tiles='CartoDB dark_matter')
         
         color_map = {
-            'Wildfires': 'red',
-            'Severe Storms': 'orange',
-            'Floods': 'blue',
+            'Wildfires': 'red', 
+            'Severe Storms': 'orange', 
+            'Floods': 'blue', 
             'Earthquakes': 'darkred',
             'Volcanoes': 'red',
             'Sea and Lake Ice': 'lightblue',
-            'Drought': 'brown'
+            'Snow': 'white',
+            'Dust and Haze': 'brown',
+            'Manmade': 'gray'
         }
         
         for _, disaster in filtered_disasters.iterrows():
@@ -1109,10 +995,10 @@ elif menu == "📊 Analytics":
                 popup_text += f"<br>📍 {disaster['distance_km']:.0f} km away"
             
             folium.CircleMarker(
-                location=[disaster['lat'], disaster['lon']],
+                location=[disaster['lat'], disaster['lon']], 
                 radius=8,
                 color=color_map.get(disaster['category'], 'gray'),
-                fill=True,
+                fill=True, 
                 fillOpacity=0.7,
                 popup=popup_text,
                 tooltip=disaster['title']
@@ -1135,9 +1021,9 @@ elif menu == "📊 Analytics":
         col1, col2 = st.columns(2)
         with col1:
             all_categories = filtered_disasters['category'].unique().tolist()
-            selected_cat = st.multiselect("🔍 Filter by Category", all_categories, default=all_categories)
+            selected_cat = st.multiselect("Filter by Category", all_categories, default=all_categories)
         with col2:
-            search = st.text_input("🔎 Search by keyword", "")
+            search = st.text_input("Search by keyword", "")
         
         final_filtered = filtered_disasters[filtered_disasters['category'].isin(selected_cat)]
         if search:
@@ -1150,20 +1036,20 @@ elif menu == "📊 Analytics":
         st.dataframe(final_filtered[display_cols], use_container_width=True, hide_index=True, height=400)
         
         st.download_button(
-            "📥 Download Data as CSV",
+            "📥 Download as CSV",
             data=final_filtered.to_csv(index=False).encode('utf-8'),
             file_name=f"disasters_{loc['city'] if loc else 'global'}_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True
         )
     else:
-        st.warning("⚠️ No disasters found in your selected area. Try:\n- Increasing the radius filter\n- Switching to Global view\n- Checking your location settings")
+        st.warning("⚠️ No disasters found in your area. Try adjusting the radius or switch to Global view.")
 
-# ✅ FIXED: Footer
+# ========== FOOTER ==========
 st.markdown("---")
 st.markdown("""
-<p style='text-align: center; color: #888; font-size: 0.9rem;'>
-    <b>AI-RescueMap</b> | Built by <b>HasnainAtif</b> for NASA Space Apps Challenge 2025<br>
-    Real-time global disaster monitoring • GPS-enabled location tracking
+<p style='text-align: center; color: gray; font-size: 0.9rem;'>
+🌍 <b>AI-RescueMap</b> • Built by <b>HasnainAtif</b> for NASA Space Apps Challenge 2025<br>
+Real-time global disaster monitoring • GPS-enabled location tracking
 </p>
 """, unsafe_allow_html=True)
