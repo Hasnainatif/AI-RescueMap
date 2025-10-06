@@ -1053,39 +1053,11 @@ if menu == "🗺 Disaster Map":
         if satellite_layers:
             m = add_nasa_satellite_layers(m, satellite_layers)
         
-       # Population layer: real WorldPop first, fallback to synthetic
-if show_population:
-    worldpop_df = read_worldpop_window(
-        url=CONFIG["WORLDPOP_URL"],
-        path=None,  # important: provide a real cache path
-        center_lat=center_lat,
-        center_lon=center_lon,
-        radius_km=impact_radius,
-        out_size=(200, 200)
-    )
-
-    if worldpop_df is not None and not worldpop_df.empty:
-        heat_data = worldpop_df[["lat", "lon", "population"]].values.tolist()
-        HeatMap(
-            heat_data,
-            radius=12,
-            blur=22,
-            max_zoom=13,
-            min_opacity=0.2,
-            gradient={0.2: 'blue', 0.5: 'lime', 0.8: 'yellow', 1.0: 'red'}
-        ).add_to(m)
-        pop_df = worldpop_df.copy()
-    else:
-        # Fallback to synthetic if the raster window can't be read
-        pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
-        heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
-        HeatMap(
-            heat_data,
-            radius=15,
-            blur=25,
-            max_zoom=13,
-            gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}
-        ).add_to(m)
+        if show_population:
+            pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
+            heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
+            HeatMap(heat_data, radius=15, blur=25, max_zoom=13, 
+                   gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}).add_to(m)
         
         if show_disasters and not disasters.empty:
             marker_cluster = MarkerCluster().add_to(m)
