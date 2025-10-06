@@ -498,114 +498,29 @@ def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use
 🚒 Fire: {contacts['fire']}
 """
         
-        prompt = f"""You are an elite emergency response expert and disaster management specialist with decades of field experience. Your role is to provide IMMEDIATE, actionable, life-saving guidance for people in REAL emergencies.
-
-**CRITICAL INSTRUCTIONS:**
-1. FIRST, validate if this is a LEGITIMATE EMERGENCY requiring immediate assistance
-2. VALID emergencies include:
-   - Natural disasters (floods, earthquakes, hurricanes, tornadoes, tsunamis, wildfires, landslides, avalanches, volcanic eruptions)
-   - Dangerous animal encounters (snakes, wild animals, aggressive animals, insect swarms)
-   - Building emergencies (structural collapse, gas leaks, fires, explosions, trapped in building)
-   - Medical emergencies during disasters (injuries, bleeding, shock, breathing problems, unconsciousness)
-   - Being lost/stranded (wilderness, desert, mountains, sea, dangerous areas, no supplies)
-   - Severe weather threats (lightning, hail, extreme temperatures, blizzards)
-   - Environmental hazards (toxic spills, radiation, smoke, contaminated water)
-   - Mass emergency situations (riots, civil unrest during disasters, mass evacuations)
-
-3. INVALID queries that should be REJECTED:
-   - Coding questions, programming help, software development
-   - Homework, assignments, academic questions unrelated to emergency survival
-   - Jokes, memes, entertainment, general chat
-   - General knowledge questions (history, science, math) not related to immediate survival
-   - Non-emergency topics (travel planning, recipes, shopping, sports, etc.)
-   - Hypothetical scenarios without real danger ("what if I was in...")
-
-**IF QUERY IS INVALID:**
-Respond EXACTLY with this format:
-"❌ **NOT AN EMERGENCY QUERY**
-
-This system is designed ONLY for real emergencies and disaster situations.
-
-**Valid emergency queries include:**
-- Natural disasters (floods, earthquakes, hurricanes, etc.)
-- Dangerous animal encounters (snakes, wild animals)
-- Building emergencies (fires, collapses, gas leaks)
-- Medical emergencies during disasters
-- Being lost or stranded in dangerous conditions
-- Severe weather threats
-- Environmental hazards
-
-**Your query appears to be about:** [briefly identify what they asked about]
-
-**If you are in a real emergency:**
-- Call local emergency services immediately
-- Describe your specific dangerous situation
-- Include your location and number of people affected
-
-Please rephrase your question if you have a genuine emergency."
-
-**IF QUERY IS VALID (REAL EMERGENCY):**
+        prompt = f"""You are an emergency disaster response expert. Provide IMMEDIATE, life-saving guidance.
 
 **DISASTER TYPE:** {disaster_type}
-**USER SITUATION:** {user_situation}{location_context}
+**SITUATION:** {user_situation}{location_context}
 
-Provide comprehensive, expert-level emergency guidance in this EXACT format:
+Provide clear, actionable advice:
 
-🚨 **IMMEDIATE ACTIONS (DO THIS RIGHT NOW - WITHIN 60 SECONDS):**
-[Provide 3-5 CRITICAL steps that must be taken IMMEDIATELY to save lives. Number each step. Be ULTRA specific - not vague advice. Include exact timing where relevant.]
+🚨 **IMMEDIATE ACTIONS:**
+[3-5 critical steps to take RIGHT NOW]
 
-⚠️ **CRITICAL DON'Ts (ACTIONS THAT CAN KILL YOU):**
-[List 3-5 specific dangerous actions people commonly make in this emergency that can be FATAL. Explain WHY each is dangerous in one sentence.]
+⚠️ **CRITICAL DON'Ts:**
+[3-4 dangerous actions to AVOID]
 
-🏃 **EVACUATION DECISION MATRIX:**
-**EVACUATE IMMEDIATELY IF:**
-- [List 3-4 specific conditions requiring immediate evacuation]
+🏃 **EVACUATION CRITERIA:**
+[When to leave immediately vs shelter in place]
 
-**SHELTER IN PLACE IF:**
-- [List 3-4 specific conditions requiring sheltering]
+📦 **ESSENTIAL ITEMS:**
+[Critical supplies to gather if possible]
 
-**EVACUATION ROUTE GUIDANCE:**
-- [Specific direction guidance for this disaster type]
-- [What to avoid during evacuation]
+⏰ **URGENCY LEVEL:**
+[Immediate (minutes) / Urgent (hours) / Plan (days)]
 
-📦 **CRITICAL SURVIVAL SUPPLIES (Priority Order):**
-**GRAB IN NEXT 5 MINUTES (Life-saving priority):**
-1. [Most critical item with reason]
-2. [Second most critical with reason]
-3. [Third most critical with reason]
-
-**GRAB IF TIME PERMITS (Important but not life-threatening):**
-- [Additional supplies with brief rationale]
-
-🩺 **IMMEDIATE MEDICAL CONCERNS:**
-[List 3-4 most common injuries/medical issues in this disaster type and ONE-LINE treatment/prevention for each]
-
-📱 **COMMUNICATION & SIGNALING:**
-- [How to call for help in this specific situation]
-- [Alternative communication methods if phones don't work]
-- [How to signal rescuers]
-
-⏰ **URGENCY ASSESSMENT:**
-**TIMING:** [Choose: IMMEDIATE (act in seconds/minutes) / URGENT (act within hours) / CRITICAL (act within 1-2 hours) / PLAN (prepare within hours)]
-
-**SURVIVAL WINDOW:** [How long can someone survive in this situation without help]
-
-**RESCUE LIKELIHOOD:** [When to expect help: hours/days/need self-rescue]
-
-🎯 **SURVIVAL PRIORITIES (Next 24 Hours):**
-1. [First priority with timeframe]
-2. [Second priority with timeframe]
-3. [Third priority with timeframe]
-
-🌡️ **ENVIRONMENTAL THREATS:**
-[List 2-3 secondary dangers that emerge after initial event - e.g., aftershocks, contaminated water, exposure]
-
-💡 **LIFE-SAVING TIPS SPECIFIC TO THIS EMERGENCY:**
-[Provide 2-3 expert-level, lesser-known survival tactics that could save lives]
-
-**CRITICAL: Keep all advice PRACTICAL, ACTIONABLE, and SPECIFIC. No generic statements. Every instruction should be clear enough that a panicked person can follow it. Focus on survival, not comfort.**
-
-Remember: YOU ARE SAVING LIVES. Be direct, be precise, be expert-level."""
+Be concise and life-saving focused. NO extra commentary."""
 
         response = model.generate_content(prompt)
         return response.text + emergency_numbers
@@ -623,172 +538,17 @@ def analyze_disaster_image(image, model, max_retries=2) -> dict:
     if not model:
         return {'success': False, 'message': 'Please add Gemini API key'}
     
-    prompt = """You are an elite disaster assessment specialist and emergency response analyst with expertise in damage assessment, risk evaluation, and crisis management.
+    prompt = """Analyze this disaster image as an expert assessor.
 
-**CRITICAL INSTRUCTIONS:**
-
-**STEP 1: IMAGE VALIDATION**
-FIRST, determine if this image shows a REAL EMERGENCY or DISASTER situation.
-
-**VALID DISASTER/EMERGENCY IMAGES:**
-- Natural disaster damage (floods, earthquakes, hurricanes, tornadoes, wildfires, tsunamis)
-- Building collapses, structural damage, destroyed infrastructure
-- Active fires, smoke, explosions, or their aftermath
-- Severe weather conditions (massive storms, lightning, hail damage)
-- Landslides, avalanches, mudflows, sinkholes
-- Dangerous animal encounters in emergency context
-- People in genuine distress/danger situations
-- Environmental hazards (toxic spills, contamination, debris fields)
-- Aftermath scenes showing significant damage or destruction
-- Rescue operations, evacuations, emergency response scenes
-
-**INVALID IMAGES TO REJECT:**
-- Memes, cartoons, edited images, fake disasters
-- Selfies, personal photos, normal daily life photos
-- Code screenshots, text documents, programming content
-- Normal weather, regular city scenes, tourist photos
-- Homework, diagrams, charts unrelated to real emergencies
-- Stock photos clearly staged or for illustration only
-- Animals in non-dangerous contexts
-- Minor damage (small scratches, normal wear and tear)
-
-**IF IMAGE IS INVALID (NOT A REAL DISASTER/EMERGENCY):**
-Respond EXACTLY in this format:
-"❌ **NOT A DISASTER/EMERGENCY IMAGE**
-
-This image does not show a real disaster or emergency situation requiring assessment.
-
-**Image appears to contain:** [Describe what the image actually shows - e.g., "a meme", "a selfie", "code screenshot", "normal scenery"]
-
-**This system analyzes ONLY:**
-- Real disaster damage and destruction
-- Active emergency situations
-- Dangerous conditions requiring response
-- Aftermath of natural disasters
-- Structural failures and hazards
-- Environmental threats
-
-**If you have a real disaster image:**
-Please upload a clear photo showing:
-- Visible damage or destruction
-- Active emergency conditions
-- Dangerous situations
-- Disaster aftermath
-
-**If you are in an emergency:**
-Call local emergency services immediately instead of uploading images."
-
-**IF IMAGE IS VALID (REAL DISASTER/EMERGENCY):**
-
-Provide comprehensive expert analysis in this EXACT format:
-
-🔍 **DISASTER TYPE & CLASSIFICATION:**
-**Primary Type:** [Specific disaster category]
-**Secondary Threats:** [Related hazards visible]
-**Event Phase:** [Active/Recent/Aftermath/Recovery]
-
-⚠️ **SEVERITY ASSESSMENT:**
-**Overall Severity:** [LOW / MODERATE / HIGH / CRITICAL / CATASTROPHIC]
-
-**Severity Justification:**
-- Structural damage level: [Percentage and description]
-- Area affected: [Estimated square km/miles]
-- Accessibility: [Are areas blocked, isolated, or accessible]
-- Immediate danger present: [Yes/No and specific threats]
-
-**Severity Score Breakdown:**
-- Infrastructure damage: [0-20 points] - [Score]/20
-- Human safety risk: [0-30 points] - [Score]/30
-- Spread/expansion potential: [0-20 points] - [Score]/20
-- Rescue difficulty: [0-15 points] - [Score]/15
-- Secondary hazards: [0-15 points] - [Score]/15
-**TOTAL SEVERITY SCORE:** [Sum]/100
-
-💥 **VISIBLE DAMAGES & DESTRUCTION:**
-**Structural:**
-- [List specific building/infrastructure damage observed]
-
-**Environmental:**
-- [List landscape, water, fire, or environmental damage]
-
-**Utility Systems:**
-- [Power lines, water, gas, communications visible damage]
-
-**Access & Mobility:**
-- [Roads, bridges, pathways - are they passable?]
-
-📏 **AFFECTED AREA ESTIMATION:**
-**Visible Impact Zone:** [Estimated size with reasoning]
-**Potential Extended Impact:** [Likely spread beyond visible area]
-**Geographic Features:** [Terrain, urban/rural, elevation factors]
-
-👥 **POPULATION RISK ASSESSMENT:**
-**Visible Population Indicators:**
-- Buildings: [Residential/commercial count visible]
-- Vehicles: [Number and condition]
-- People: [If visible, how many, condition]
-
-**Estimated Risk Level:** [EXTREME / HIGH / MODERATE / LOW]
-**Vulnerable Populations:** [Elderly, children, disabled - if indicators present]
-**Evacuation Status:** [Evidence of evacuation? Empty/occupied areas?]
-
-🚨 **IMMEDIATE CONCERNS (TOP 5 CRITICAL PRIORITIES):**
-1. [Most urgent threat with specific action needed]
-2. [Second urgent threat with action]
-3. [Third urgent threat with action]
-4. [Fourth concern with action]
-5. [Fifth concern with action]
-
-🚒 **RESPONSE RECOMMENDATIONS:**
-
-**IMMEDIATE (0-2 hours):**
-- [Specific action 1]
-- [Specific action 2]
-- [Specific action 3]
-
-**SHORT-TERM (2-24 hours):**
-- [Critical need 1]
-- [Critical need 2]
-- [Critical need 3]
-
-**RESOURCES NEEDED:**
-- Personnel: [Types and estimated numbers]
-- Equipment: [Specific machinery, tools required]
-- Supplies: [Materials, medical, food, water quantities]
-- Specialists: [Engineers, medical, hazmat, etc.]
-
-🛠️ **RECOVERY TIME ESTIMATE:**
-**Category:** [SHORT-TERM (days-weeks) / MEDIUM-TERM (weeks-months) / LONG-TERM (months-years) / CATASTROPHIC (years-decade+)]
-
-**Justification:**
-- Damage extent: [Why this timeframe]
-- Resource requirements: [What's needed for recovery]
-- Infrastructure rebuilding: [Major systems to restore]
-
-**Recovery Phases:**
-1. Emergency response: [Timeframe]
-2. Debris removal & safety: [Timeframe]
-3. Infrastructure restoration: [Timeframe]
-4. Full recovery: [Timeframe]
-
-🌊 **SECONDARY HAZARD WARNINGS:**
-[List 3-5 potential secondary disasters that could develop:]
-- [Hazard 1 and likelihood]
-- [Hazard 2 and likelihood]
-- [Hazard 3 and likelihood]
-
-📊 **DAMAGE METRICS (If Measurable):**
-- Estimated financial impact: [USD range if determinable]
-- Buildings affected: [Count/percentage]
-- Critical infrastructure: [What's damaged]
-- Environmental impact: [Pollution, contamination, ecosystem]
-
-**ASSESSMENT CONFIDENCE LEVEL:** [HIGH / MODERATE / LOW - based on image clarity and visible details]
-
-**LIMITATIONS OF THIS ASSESSMENT:**
-[Note what cannot be determined from the image alone - hidden damage, casualties, exact measurements, etc.]
-
-**CRITICAL: Every assessment should be SPECIFIC, MEASURABLE, and ACTIONABLE. Avoid vague language. If you cannot determine something from the image, explicitly state that limitation.**"""
+Provide:
+**DISASTER TYPE:** [Type]
+**SEVERITY:** [LOW/MODERATE/HIGH/CRITICAL and why]
+**VISIBLE DAMAGES:** [List]
+**AFFECTED AREA:** [Estimate]
+**POPULATION RISK:** [Assessment]
+**IMMEDIATE CONCERNS:** [Top 3]
+**RESPONSE RECOMMENDATIONS:** [Actions needed]
+**RECOVERY TIME:** [Short/Medium/Long-term]"""
 
     for attempt in range(max_retries):
         try:
