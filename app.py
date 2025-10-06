@@ -8,7 +8,6 @@ from folium.plugins import HeatMap, MarkerCluster
 import numpy as np
 from datetime import datetime, timedelta
 import time
-from urllib.parse import quote
 
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
 
@@ -65,16 +64,15 @@ st.markdown("""
 
 CONFIG = {
     "EONET_API": "https://eonet.gsfc.nasa.gov/api/v3/events",
-    "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",
-    "IPAPI_URL": "https://ipapi.co/json/",
-    "IPAPI_BACKUP": "http://ip-api.com/json/",
-    # ✅ MULTIPLE GEOCODING APIS WITH FALLBACK
-    "NOMINATIM_API": "https://nominatim.openstreetmap.org/search",
-    "NOMINATIM_REVERSE": "https://nominatim.openstreetmap.org/reverse",
-    "GEOCODE_API": "https://geocode.maps.co/search",  # Alternative 1
-    "PHOTON_API": "https://photon.komoot.io/api/",   # Alternative 2
+    "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",  # NASA satellite imagery
+    "IPAPI_URL": "https://ipapi.co/json/",  # Primary IP geolocation service
+    "IPAPI_BACKUP": "http://ip-api.com/json/",  # Backup IP geolocation service
+    "GEOCODING_API": "https://nominatim.openstreetmap.org/search",  # Primary geocoding
+    "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse",  # Reverse geocoding
+    "GEOCODING_BACKUP": "https://geocode.maps.co/search",  # Backup geocoding (no API key needed)
 }
 
+# ✅ WORLDWIDE EMERGENCY CONTACTS DATABASE
 EMERGENCY_CONTACTS = {
     "Pakistan": {"emergency": "112 / 1122", "police": "15", "ambulance": "1122", "fire": "16"},
     "United States": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
@@ -103,11 +101,17 @@ def get_emergency_contacts(country: str) -> dict:
     """Get emergency contacts for a specific country"""
     return EMERGENCY_CONTACTS.get(country, EMERGENCY_CONTACTS["Default"])
 
-# ✅ FIXED: Geocoding with multiple fallback APIs
-def geocode_location(city_or_address: str, max_retries=3):
-    """Convert city/address to coordinates with multiple API fallbacks"""
+# ✅ FIXED: Geocode with MULTIPLE fallback services
+def geocode_location(city_or_address: str, max_retries=2):
+    """
+    Convert city/address to coordinates with multiple fallback services.
     
-    # Try API 1: Nominatim (OpenStreetMap)
+    Services used:
+    1. OpenStreetMap Nominatim (primary)
+    2. geocode.maps.co (backup - no API key needed)
+    3. If both fail, tries partial matches
+    """
+    # Try primary service (OpenStreetMap Nominatim)
     for attempt in range(max_retries):
         try:
             params = {
@@ -116,17 +120,9 @@ def geocode_location(city_or_address: str, max_retries=3):
                 'limit': 1,
                 'addressdetails': 1
             }
-            headers = {
-                'User-Agent': 'AI-RescueMap/1.0 (contact@rescuemap.app)',
-                'Accept-Language': 'en'
-            }
+            headers = {'User-Agent': 'AI-RescueMap/1.0 (NASA Space Apps 2025)'}
             
-            response = requests.get(
-                CONFIG["NOMINATIM_API"], 
-                params=params, 
-                headers=headers, 
-                timeout=10
-            )
+            response = requests.get(CONFIG["GEOCODING_API"], params=params, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -143,170 +139,144 @@ def geocode_location(city_or_address: str, max_retries=3):
                         'region': address.get('state') or address.get('region', 'Unknown'),
                         'full_address': result.get('display_name', city_or_address),
                         'method': 'manual',
-                        'source': 'Geocoded (Nominatim)'
+                        'source': 'OpenStreetMap'
                     }
             
-            # Rate limited, wait before retry
+            # If rate limited, wait and retry
             if response.status_code == 429:
-                wait_time = 2 ** attempt  # Exponential backoff
-                time.sleep(wait_time)
-                continue
-                
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                    
         except requests.exceptions.ConnectionError:
-            st.warning(f"⚠️ Connection failed to Nominatim (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                time.sleep(1)
-                continue
+            # Connection refused - try backup service immediately
+            break
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1)
                 continue
     
-    # Try API 2: Geocode.maps.co (Alternative)
+    # ✅ Try backup service (geocode.maps.co)
     try:
-        encoded_query = quote(city_or_address)
-        url = f"{CONFIG['GEOCODE_API']}?q={encoded_query}"
+        params = {
+            'q': city_or_address,
+            'format': 'json'
+        }
         
-        response = requests.get(url, timeout=10)
+        response = requests.get(CONFIG["GEOCODING_BACKUP"], params=params, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
             
             if data and len(data) > 0:
                 result = data[0]
-                display_name_parts = result.get('display_name', '').split(',')
                 
                 return {
                     'lat': float(result['lat']),
                     'lon': float(result['lon']),
-                    'city': display_name_parts[0].strip() if display_name_parts else city_or_address,
-                    'country': display_name_parts[-1].strip() if len(display_name_parts) > 0 else 'Unknown',
-                    'region': display_name_parts[1].strip() if len(display_name_parts) > 1 else 'Unknown',
+                    'city': result.get('display_name', city_or_address).split(',')[0],
+                    'country': result.get('display_name', '').split(',')[-1].strip() if ',' in result.get('display_name', '') else 'Unknown',
+                    'region': result.get('display_name', '').split(',')[1].strip() if len(result.get('display_name', '').split(',')) > 1 else 'Unknown',
                     'full_address': result.get('display_name', city_or_address),
                     'method': 'manual',
-                    'source': 'Geocoded (Geocode.maps.co)'
+                    'source': 'Geocode.maps.co'
                 }
     except Exception as e:
         pass
     
-    # Try API 3: Photon (Komoot)
-    try:
-        encoded_query = quote(city_or_address)
-        url = f"{CONFIG['PHOTON_API']}?q={encoded_query}&limit=1"
-        
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if data and 'features' in data and len(data['features']) > 0:
-                result = data['features'][0]
-                coords = result['geometry']['coordinates']
-                props = result.get('properties', {})
-                
-                return {
-                    'lat': coords[1],
-                    'lon': coords[0],
-                    'city': props.get('city') or props.get('name', city_or_address),
-                    'country': props.get('country', 'Unknown'),
-                    'region': props.get('state', 'Unknown'),
-                    'full_address': props.get('name', city_or_address),
-                    'method': 'manual',
-                    'source': 'Geocoded (Photon)'
-                }
-    except Exception as e:
-        pass
+    # ✅ Final fallback: Try with country code only (approximate)
+    country_coords = {
+        'pakistan': {'lat': 30.3753, 'lon': 69.3451, 'city': 'Pakistan', 'region': 'Central'},
+        'faisalabad': {'lat': 31.4504, 'lon': 73.1350, 'city': 'Faisalabad', 'region': 'Punjab'},
+        'united states': {'lat': 37.0902, 'lon': -95.7129, 'city': 'United States', 'region': 'Central'},
+        'india': {'lat': 20.5937, 'lon': 78.9629, 'city': 'India', 'region': 'Central'},
+        'china': {'lat': 35.8617, 'lon': 104.1954, 'city': 'China', 'region': 'Central'},
+        'japan': {'lat': 36.2048, 'lon': 138.2529, 'city': 'Japan', 'region': 'Central'},
+        'australia': {'lat': -25.2744, 'lon': 133.7751, 'city': 'Australia', 'region': 'Central'},
+        'canada': {'lat': 56.1304, 'lon': -106.3468, 'city': 'Canada', 'region': 'Central'},
+        'brazil': {'lat': -14.2350, 'lon': -51.9253, 'city': 'Brazil', 'region': 'Central'},
+        'russia': {'lat': 61.5240, 'lon': 105.3188, 'city': 'Russia', 'region': 'Central'},
+        'uk': {'lat': 55.3781, 'lon': -3.4360, 'city': 'United Kingdom', 'region': 'Central'},
+        'germany': {'lat': 51.1657, 'lon': 10.4515, 'city': 'Germany', 'region': 'Central'},
+        'france': {'lat': 46.2276, 'lon': 2.2137, 'city': 'France', 'region': 'Central'},
+    }
     
-    # All APIs failed
-    st.error(f"❌ Could not find location '{city_or_address}'. All geocoding services failed.")
-    st.info("💡 **Troubleshooting:**\n"
-            "1. Try adding country name (e.g., 'Faisalabad, Pakistan')\n"
-            "2. Check spelling\n"
-            "3. Try a larger city nearby\n"
-            "4. Use GPS button instead")
+    search_lower = city_or_address.lower()
+    for key, coords in country_coords.items():
+        if key in search_lower:
+            return {
+                **coords,
+                'country': coords['city'],
+                'full_address': city_or_address,
+                'method': 'manual',
+                'source': 'Approximate (Fallback)'
+            }
+    
+    st.error(f"❌ Could not find location: {city_or_address}. Please try adding more details (e.g., 'City, Country')")
     return None
 
-# ✅ FIXED: Reverse geocoding with fallback
-def reverse_geocode(lat: float, lon: float):
-    """Convert coordinates to address with fallback"""
-    
-    # Try Nominatim first
-    try:
-        params = {
-            'lat': lat,
-            'lon': lon,
-            'format': 'json',
-            'addressdetails': 1
-        }
-        headers = {
-            'User-Agent': 'AI-RescueMap/1.0 (contact@rescuemap.app)',
-            'Accept-Language': 'en'
-        }
-        
-        response = requests.get(
-            CONFIG["NOMINATIM_REVERSE"], 
-            params=params, 
-            headers=headers, 
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
+# ✅ FIXED: Reverse geocode with retry logic
+def reverse_geocode(lat: float, lon: float, max_retries=2):
+    """Convert coordinates to address with retry logic"""
+    for attempt in range(max_retries):
+        try:
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'format': 'json',
+                'addressdetails': 1
+            }
+            headers = {'User-Agent': 'AI-RescueMap/1.0 (NASA Space Apps 2025)'}
             
-            if data and 'address' in data:
-                address = data['address']
-                return {
-                    'lat': lat,
-                    'lon': lon,
-                    'city': address.get('city') or address.get('town') or address.get('village', 'Unknown'),
-                    'country': address.get('country', 'Unknown'),
-                    'region': address.get('state') or address.get('region', 'Unknown'),
-                    'full_address': data.get('display_name', f"{lat}, {lon}"),
-                    'method': 'browser',
-                    'source': 'Browser GPS (Nominatim)'
-                }
-    except Exception as e:
-        pass
-    
-    # Try Photon reverse geocoding
-    try:
-        url = f"{CONFIG['PHOTON_API']}reverse?lon={lon}&lat={lat}"
-        
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
+            response = requests.get(CONFIG["REVERSE_GEOCODING_API"], params=params, headers=headers, timeout=10)
             
-            if data and 'features' in data and len(data['features']) > 0:
-                props = data['features'][0].get('properties', {})
+            if response.status_code == 200:
+                data = response.json()
                 
-                return {
-                    'lat': lat,
-                    'lon': lon,
-                    'city': props.get('city') or props.get('name', 'Unknown'),
-                    'country': props.get('country', 'Unknown'),
-                    'region': props.get('state', 'Unknown'),
-                    'full_address': props.get('name', f"{lat}, {lon}"),
-                    'method': 'browser',
-                    'source': 'Browser GPS (Photon)'
-                }
-    except Exception as e:
-        pass
+                if data and 'address' in data:
+                    address = data['address']
+                    return {
+                        'lat': lat,
+                        'lon': lon,
+                        'city': address.get('city') or address.get('town') or address.get('village', 'Unknown'),
+                        'country': address.get('country', 'Unknown'),
+                        'region': address.get('state') or address.get('region', 'Unknown'),
+                        'full_address': data.get('display_name', f"{lat}, {lon}"),
+                        'method': 'browser',
+                        'source': 'Browser GPS'
+                    }
+            
+            if response.status_code == 429 and attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+                
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(1)
+                continue
     
-    # Fallback: Return coordinates without address
+    # Fallback: return coordinates without address
     return {
         'lat': lat,
         'lon': lon,
         'city': f"Location ({lat:.2f}, {lon:.2f})",
         'country': 'Unknown',
         'region': 'Unknown',
-        'full_address': f"Coordinates: {lat:.4f}, {lon:.4f}",
+        'full_address': f"{lat:.4f}, {lon:.4f}",
         'method': 'browser',
-        'source': 'Browser GPS (No reverse geocoding)'
+        'source': 'GPS (No address found)'
     }
 
+# ✅ FIXED: IP-based fallback location
 def get_ip_location():
-    """Get location from IP (fallback only)"""
+    """
+    Get location from IP address (fallback only).
+    
+    Uses two services:
+    1. ipapi.co (https://ipapi.co/json/) - Primary, more accurate
+    2. ip-api.com (http://ip-api.com/json/) - Backup, free unlimited
+    """
+    # Try primary IP geolocation service
     try:
         response = requests.get(CONFIG["IPAPI_URL"], timeout=5)
         data = response.json()
@@ -320,11 +290,12 @@ def get_ip_location():
                 'region': data.get('region', 'Unknown'),
                 'ip': data.get('ip', 'Unknown'),
                 'method': 'ip',
-                'source': 'IP Geolocation (Fallback)'
+                'source': 'IP Geolocation (ipapi.co)'
             }
     except:
         pass
     
+    # Try backup IP geolocation service
     try:
         response = requests.get(CONFIG["IPAPI_BACKUP"], timeout=5)
         data = response.json()
@@ -338,11 +309,12 @@ def get_ip_location():
                 'region': data.get('regionName', 'Unknown'),
                 'ip': data.get('query', 'Unknown'),
                 'method': 'ip',
-                'source': 'IP Geolocation (Backup)'
+                'source': 'IP Geolocation (ip-api.com)'
             }
     except:
         pass
     
+    # Last resort fallback
     return {
         'lat': 20.0,
         'lon': 0.0,
@@ -387,6 +359,7 @@ def setup_gemini(api_key: str = None, model_type: str = "text"):
 
 @st.cache_data(ttl=1800)
 def fetch_nasa_eonet_disasters(status="open", limit=500):
+    """Fetch disasters from NASA EONET API - includes ALL disaster types"""
     try:
         url = f"{CONFIG['EONET_API']}?status={status}&limit={limit}"
         response = requests.get(url, timeout=15)
@@ -424,6 +397,16 @@ def fetch_nasa_eonet_disasters(status="open", limit=500):
         return pd.DataFrame()
 
 def add_nasa_satellite_layers(folium_map, selected_layers):
+    """
+    Add NASA GIBS satellite imagery layers to the map.
+    
+    NASA GIBS (Global Imagery Browse Services) provides near real-time satellite imagery.
+    Layers include:
+    - True Color: Natural color satellite imagery
+    - Active Fires: Fire detection from VIIRS sensor
+    - Night Lights: Human settlements and activity at night
+    - Water Vapor: Atmospheric water vapor content
+    """
     date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
     layers_config = {
@@ -540,7 +523,6 @@ Provide clear, actionable advice:
 Be concise and life-saving focused. NO extra commentary."""
 
         response = model.generate_content(prompt)
-        
         return response.text + emergency_numbers
         
     except Exception as e:
@@ -599,9 +581,7 @@ Provide:
                         'success': False,
                         'message': f"""⚠️ **Rate Limit Exceeded**
 
-Free tier quota hit. Please wait 2-3 minutes and try again.
-
-Error: {error_msg[:200]}"""
+Free tier quota hit. Please wait 2-3 minutes and try again."""
                     }
             else:
                 return {'success': False, 'message': f'Analysis failed: {error_msg[:300]}'}
@@ -638,14 +618,12 @@ with st.sidebar:
     loc = get_current_location()
     
     if loc:
-        if loc.get('method') == 'browser':
-            badge = "🌐 Browser GPS"
-        elif loc.get('method') == 'manual':
-            badge = "📍 Manual Entry"
-        elif loc.get('method') == 'ip':
-            badge = "🌐 IP-Based (Less Accurate)"
-        else:
-            badge = "📍 Default"
+        method_badge = {
+            'browser': '🎯 GPS (Most Accurate)',
+            'manual': '📍 Manual Entry',
+            'ip': '🌐 IP-Based (Less Accurate)'
+        }
+        badge = method_badge.get(loc.get('method'), '📍 Unknown')
         
         st.success(f"**{loc['city']}, {loc['region']}**")
         st.info(f"🌍 {loc['country']}")
@@ -661,8 +639,7 @@ with st.sidebar:
         st.error("❌ Location unavailable")
     
     st.markdown("---")
-    st.markdown("### 🌐 Get My Location")
-    st.caption("📍 Uses your device's GPS (browser permission required)")
+    st.markdown("### 🌐 Get My Location (GPS)")
     
     location_html = """
     <script>
@@ -748,9 +725,8 @@ with st.sidebar:
                 browser_loc = reverse_geocode(gps_lat, gps_lon)
                 if browser_loc:
                     st.session_state.browser_location = browser_loc
-                    st.success(f"✅ Location detected: {browser_loc['city']}, {browser_loc['country']}")
+                    st.success(f"✅ GPS: {browser_loc['city']}, {browser_loc['country']}")
                     st.caption(f"📍 Accuracy: ~{int(gps_acc)}m")
-                    
                     st.query_params.clear()
                     time.sleep(1)
                     st.rerun()
@@ -760,20 +736,11 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 📝 Enter Location Manually")
-    st.caption("🌍 Works for any city worldwide")
     
     with st.expander("🔧 Manual Entry"):
-        st.info("**Examples:**\n"
-                "- Faisalabad, Pakistan\n"
-                "- New York, USA\n"
-                "- Tokyo, Japan\n"
-                "- London, UK")
+        st.info("**Examples:**\n- Faisalabad, Pakistan\n- New York, USA\n- Tokyo, Japan")
         
-        location_input = st.text_input(
-            "City/Country",
-            placeholder="e.g., Faisalabad, Pakistan",
-            key="manual_input"
-        )
+        location_input = st.text_input("City, Country", placeholder="e.g., Faisalabad, Pakistan")
         
         col_btn1, col_btn2 = st.columns(2)
         
@@ -785,23 +752,17 @@ with st.sidebar:
                         if geocoded:
                             st.session_state.manual_location = geocoded
                             st.session_state.browser_location = None
-                            st.success(f"✅ Found: {geocoded['city']}, {geocoded['country']}")
+                            st.success(f"✅ Found!")
                             time.sleep(1)
                             st.rerun()
         
         with col_btn2:
             if st.session_state.manual_location and st.button("🔄 Reset", use_container_width=True):
                 st.session_state.manual_location = None
-                st.success("✅ Reset to GPS/IP")
+                st.session_state.browser_location = None
+                st.success("✅ Reset")
                 time.sleep(0.5)
                 st.rerun()
-    
-    if st.session_state.browser_location:
-        if st.button("🔄 Clear GPS Location", use_container_width=True):
-            st.session_state.browser_location = None
-            st.success("✅ GPS location cleared")
-            time.sleep(0.5)
-            st.rerun()
 
 st.markdown('<h1 class="main-header">AI-RescueMap 🌍</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Real-time global disaster monitoring with NASA data & AI</p>', unsafe_allow_html=True)
@@ -945,35 +906,28 @@ if menu == "🗺 Disaster Map":
 elif menu == "💬 AI Guidance":
     st.markdown("## 💬 AI Emergency Guidance")
     
-    use_location = st.checkbox(
-        "📍 Use my location for context-specific guidance",
-        value=False,
-        help="Get location-specific emergency numbers and local advice"
-    )
+    use_location = st.checkbox("📍 Use my location for guidance", value=False)
     
     if use_location and loc:
-        st.info(f"🎯 Using location: **{loc['city']}, {loc['country']}**")
+        st.info(f"🎯 Using: **{loc['city']}, {loc['country']}**")
     
     disaster_type = st.selectbox("Disaster Type", 
         ["Flood", "Wildfire", "Earthquake", "Hurricane", "Tsunami", "Tornado", "Volcano", "Landslide", "Other"])
     
     user_situation = st.text_area("Describe your situation:",
-        placeholder="Be specific: What is happening? Number of people? Current conditions? Available resources?",
+        placeholder="Be specific: What is happening? Number of people? Current conditions?",
         height=120)
     
     if st.button("🚨 GET AI GUIDANCE", type="primary", use_container_width=True):
         if not user_situation:
             st.error("❌ Please describe your situation")
         elif not st.session_state.gemini_model_text:
-            st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY to settings")
+            st.warning("⚠️ AI unavailable")
         else:
-            with st.spinner("🤖 Analyzing with AI..."):
+            with st.spinner("🤖 Analyzing..."):
                 guidance = get_ai_disaster_guidance(
-                    disaster_type, 
-                    user_situation, 
-                    st.session_state.gemini_model_text,
-                    use_location=use_location,
-                    location=loc if use_location else None
+                    disaster_type, user_situation, st.session_state.gemini_model_text,
+                    use_location=use_location, location=loc if use_location else None
                 )
                 st.markdown(f'<div class="ai-response">{guidance}</div>', unsafe_allow_html=True)
 
@@ -981,19 +935,18 @@ elif menu == "🖼 Image Analysis":
     from PIL import Image
     
     st.markdown("## 🖼 AI Image Analysis")
-    st.info("⚠️ Free tier: ~15 requests/minute. Wait if quota exceeded.")
     
-    uploaded_file = st.file_uploader("Upload disaster image", type=['jpg', 'jpeg', 'png'])
+    uploaded_file = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png'])
     
     if uploaded_file:
         image = Image.open(uploaded_file)
         st.image(image, use_column_width=True)
         
-        if st.button("🔍 ANALYZE IMAGE", type="primary", use_container_width=True):
+        if st.button("🔍 ANALYZE", type="primary", use_container_width=True):
             if not st.session_state.gemini_model_image:
-                st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY to settings")
+                st.warning("⚠️ AI unavailable")
             else:
-                with st.spinner("🤖 Analyzing image..."):
+                with st.spinner("🤖 Analyzing..."):
                     result = analyze_disaster_image(image, st.session_state.gemini_model_image)
                     
                     if result['success']:
@@ -1007,18 +960,17 @@ elif menu == "🖼 Image Analysis":
                         
                         st.markdown(f'<div class="ai-response">{result["analysis"]}</div>', unsafe_allow_html=True)
                     else:
-                        st.error(result.get('message', 'Analysis failed'))
+                        st.error(result.get('message'))
 
 elif menu == "📊 Analytics":
     st.markdown("## 📊 Analytics Dashboard")
     
     if loc:
-        view_mode = st.radio("View Mode:", ["📍 My Location", "🌍 Global View"], horizontal=True)
+        view_mode = st.radio("View:", ["📍 My Location", "🌍 Global View"], horizontal=True)
     else:
         view_mode = "🌍 Global View"
-        st.info("ℹ️ Location unavailable - showing global view")
     
-    with st.spinner("📡 Loading disaster data..."):
+    with st.spinner("📡 Loading data..."):
         disasters = fetch_nasa_eonet_disasters(limit=500)
     
     if not disasters.empty and loc:
@@ -1028,126 +980,47 @@ elif menu == "📊 Analytics":
         )
     
     if "My Location" in view_mode and loc and not disasters.empty:
-        radius_filter = st.slider("Show disasters within (km):", 100, 5000, 1000, step=100)
-        filtered_disasters = disasters[disasters['distance_km'] <= radius_filter].copy()
-        st.success(f"📍 Showing {len(filtered_disasters)} disasters within {radius_filter} km of **{loc['city']}, {loc['country']}**")
+        radius = st.slider("Radius (km)", 100, 5000, 1000, step=100)
+        disasters = disasters[disasters['distance_km'] <= radius].sort_values('distance_km')
+        st.success(f"📍 {len(disasters)} disasters within {radius} km")
     else:
-        filtered_disasters = disasters
-        st.info(f"🌍 Showing all {len(filtered_disasters)} global disasters")
+        st.info(f"🌍 Showing {len(disasters)} global disasters")
     
-    if not filtered_disasters.empty:
+    if not disasters.empty:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("🌍 Total Disasters", len(filtered_disasters))
+            st.metric("🌍 Total", len(disasters))
         with col2:
-            wildfires = len(filtered_disasters[filtered_disasters['category'] == 'Wildfires'])
-            st.metric("🔥 Wildfires", wildfires)
+            st.metric("🔥 Wildfires", len(disasters[disasters['category'] == 'Wildfires']))
         with col3:
-            storms = len(filtered_disasters[filtered_disasters['category'] == 'Severe Storms'])
-            st.metric("🌪 Storms", storms)
+            st.metric("🌊 Floods", len(disasters[disasters['category'] == 'Floods']))
         with col4:
-            others = len(filtered_disasters[~filtered_disasters['category'].isin(['Wildfires', 'Severe Storms'])])
-            st.metric("🌊 Other", others)
+            st.metric("⛰️ Earthquakes", len(disasters[disasters['category'] == 'Earthquakes']))
         
         st.markdown("---")
         
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("### 📊 By Category")
-            category_counts = filtered_disasters['category'].value_counts()
-            st.bar_chart(category_counts)
+            st.bar_chart(disasters['category'].value_counts())
         
         with col_b:
-            st.markdown("### 📅 Recent Events")
-            display_cols = ['title', 'category', 'date']
-            if 'distance_km' in filtered_disasters.columns and "My Location" in view_mode:
-                filtered_disasters['distance_km'] = filtered_disasters['distance_km'].round(0).astype(int)
-                display_cols.append('distance_km')
-            
-            recent = filtered_disasters.head(10)[display_cols]
-            st.dataframe(recent, use_container_width=True, hide_index=True)
-        
-        st.markdown("---")
-        
-        st.markdown(f"### 🗺 {'Local' if 'My Location' in view_mode else 'Global'} Distribution")
-        
-        map_center = [loc['lat'], loc['lon']] if loc and "My Location" in view_mode else [20, 0]
-        map_zoom = 6 if "My Location" in view_mode else 2
-        
-        m = folium.Map(location=map_center, zoom_start=map_zoom, tiles='CartoDB dark_matter')
-        
-        color_map = {
-            'Wildfires': 'red', 
-            'Severe Storms': 'orange', 
-            'Floods': 'blue', 
-            'Earthquakes': 'darkred',
-            'Volcanoes': 'red',
-            'Sea and Lake Ice': 'lightblue',
-            'Snow': 'white',
-            'Dust and Haze': 'brown',
-            'Manmade': 'gray'
-        }
-        
-        for _, disaster in filtered_disasters.iterrows():
-            popup_text = f"<b>{disaster['title']}</b><br>{disaster['category']}"
-            if 'distance_km' in disaster and "My Location" in view_mode:
-                popup_text += f"<br>📍 {disaster['distance_km']:.0f} km away"
-            
-            folium.CircleMarker(
-                location=[disaster['lat'], disaster['lon']], 
-                radius=8,
-                color=color_map.get(disaster['category'], 'gray'),
-                fill=True, 
-                fillOpacity=0.7,
-                popup=popup_text,
-                tooltip=disaster['title']
-            ).add_to(m)
-        
-        if loc and "My Location" in view_mode:
-            folium.Marker(
-                location=[loc['lat'], loc['lon']],
-                popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
-                icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
-                tooltip="Your Location"
-            ).add_to(m)
-        
-        st_folium(m, width=1200, height=500)
-        
-        st.markdown("---")
-        
-        st.markdown("### 📋 All Disasters")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            all_categories = filtered_disasters['category'].unique().tolist()
-            selected_cat = st.multiselect("Filter by Category", all_categories, default=all_categories)
-        with col2:
-            search = st.text_input("Search by keyword", "")
-        
-        final_filtered = filtered_disasters[filtered_disasters['category'].isin(selected_cat)]
-        if search:
-            final_filtered = final_filtered[final_filtered['title'].str.contains(search, case=False, na=False)]
-        
-        display_cols = ['title', 'category', 'date', 'lat', 'lon']
-        if 'distance_km' in final_filtered.columns and "My Location" in view_mode:
-            display_cols.append('distance_km')
-        
-        st.dataframe(final_filtered[display_cols], use_container_width=True, hide_index=True, height=400)
+            st.markdown("### 📅 Recent")
+            cols = ['title', 'category', 'date']
+            if 'distance_km' in disasters.columns:
+                cols.append('distance_km')
+            st.dataframe(disasters.head(10)[cols], use_container_width=True, hide_index=True)
         
         st.download_button(
-            "📥 Download as CSV",
-            data=final_filtered.to_csv(index=False).encode('utf-8'),
-            file_name=f"disasters_{loc['city'] if loc else 'global'}_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
+            "📥 Download CSV",
+            disasters.to_csv(index=False).encode('utf-8'),
+            f"disasters_{datetime.now().strftime('%Y%m%d')}.csv",
+            "text/csv"
         )
-    else:
-        st.warning("⚠️ No disasters found in your area. Try adjusting the radius or switch to Global view.")
 
 st.markdown("---")
 st.markdown("""
-<p style='text-align: center; color: gray; font-size: 0.9rem;'>
-🌍 <b>AI-RescueMap</b> • Built by <b>HasnainAtif</b> for NASA Space Apps Challenge 2025<br>
-Real-time global disaster monitoring • GPS-enabled location tracking
+<p style='text-align: center; color: gray;'>
+🌍 <b>AI-RescueMap</b> • <b>HasnainAtif</b> @ NASA Space Apps 2025
 </p>
 """, unsafe_allow_html=True)
