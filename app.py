@@ -1,3 +1,4 @@
+```python
 import os
 import streamlit as st
 import requests
@@ -59,20 +60,27 @@ st.markdown("""
         margin: 1rem 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
+    .warning-response {
+        background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
 </style>
 """, unsafe_allow_html=True)
 
 CONFIG = {
     "EONET_API": "https://eonet.gsfc.nasa.gov/api/v3/events",
-    "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",  # NASA satellite imagery
-    "IPAPI_URL": "https://ipapi.co/json/",  # Primary IP geolocation service
-    "IPAPI_BACKUP": "http://ip-api.com/json/",  # Backup IP geolocation service
-    "GEOCODING_API": "https://nominatim.openstreetmap.org/search",  # Primary geocoding
-    "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse",  # Reverse geocoding
-    "GEOCODING_BACKUP": "https://geocode.maps.co/search",  # Backup geocoding (no API key needed)
+    "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",
+    "IPAPI_URL": "https://ipapi.co/json/",
+    "IPAPI_BACKUP": "http://ip-api.com/json/",
+    "GEOCODING_API": "https://nominatim.openstreetmap.org/search",
+    "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse",
+    "GEOCODING_BACKUP": "https://geocode.maps.co/search",
 }
 
-# ✅ WORLDWIDE EMERGENCY CONTACTS DATABASE
 EMERGENCY_CONTACTS = {
     "Pakistan": {"emergency": "112 / 1122", "police": "15", "ambulance": "1122", "fire": "16"},
     "United States": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
@@ -101,17 +109,8 @@ def get_emergency_contacts(country: str) -> dict:
     """Get emergency contacts for a specific country"""
     return EMERGENCY_CONTACTS.get(country, EMERGENCY_CONTACTS["Default"])
 
-# ✅ FIXED: Geocode with MULTIPLE fallback services
 def geocode_location(city_or_address: str, max_retries=2):
-    """
-    Convert city/address to coordinates with multiple fallback services.
-    
-    Services used:
-    1. OpenStreetMap Nominatim (primary)
-    2. geocode.maps.co (backup - no API key needed)
-    3. If both fail, tries partial matches
-    """
-    # Try primary service (OpenStreetMap Nominatim)
+    """Convert city/address to coordinates with multiple fallback services."""
     for attempt in range(max_retries):
         try:
             params = {
@@ -142,21 +141,18 @@ def geocode_location(city_or_address: str, max_retries=2):
                         'source': 'OpenStreetMap'
                     }
             
-            # If rate limited, wait and retry
             if response.status_code == 429:
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
                     
         except requests.exceptions.ConnectionError:
-            # Connection refused - try backup service immediately
             break
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1)
                 continue
     
-    # ✅ Try backup service (geocode.maps.co)
     try:
         params = {
             'q': city_or_address,
@@ -184,7 +180,6 @@ def geocode_location(city_or_address: str, max_retries=2):
     except Exception as e:
         pass
     
-    # ✅ Final fallback: Try with country code only (approximate)
     country_coords = {
         'pakistan': {'lat': 30.3753, 'lon': 69.3451, 'city': 'Pakistan', 'region': 'Central'},
         'faisalabad': {'lat': 31.4504, 'lon': 73.1350, 'city': 'Faisalabad', 'region': 'Punjab'},
@@ -215,7 +210,6 @@ def geocode_location(city_or_address: str, max_retries=2):
     st.error(f"❌ Could not find location: {city_or_address}. Please try adding more details (e.g., 'City, Country')")
     return None
 
-# ✅ FIXED: Reverse geocode with retry logic
 def reverse_geocode(lat: float, lon: float, max_retries=2):
     """Convert coordinates to address with retry logic"""
     for attempt in range(max_retries):
@@ -255,7 +249,6 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
                 time.sleep(1)
                 continue
     
-    # Fallback: return coordinates without address
     return {
         'lat': lat,
         'lon': lon,
@@ -267,16 +260,8 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
         'source': 'GPS (No address found)'
     }
 
-# ✅ FIXED: IP-based fallback location
 def get_ip_location():
-    """
-    Get location from IP address (fallback only).
-    
-    Uses two services:
-    1. ipapi.co (https://ipapi.co/json/) - Primary, more accurate
-    2. ip-api.com (http://ip-api.com/json/) - Backup, free unlimited
-    """
-    # Try primary IP geolocation service
+    """Get location from IP address (fallback only)."""
     try:
         response = requests.get(CONFIG["IPAPI_URL"], timeout=5)
         data = response.json()
@@ -295,7 +280,6 @@ def get_ip_location():
     except:
         pass
     
-    # Try backup IP geolocation service
     try:
         response = requests.get(CONFIG["IPAPI_BACKUP"], timeout=5)
         data = response.json()
@@ -314,7 +298,6 @@ def get_ip_location():
     except:
         pass
     
-    # Last resort fallback
     return {
         'lat': 20.0,
         'lon': 0.0,
@@ -397,16 +380,7 @@ def fetch_nasa_eonet_disasters(status="open", limit=500):
         return pd.DataFrame()
 
 def add_nasa_satellite_layers(folium_map, selected_layers):
-    """
-    Add NASA GIBS satellite imagery layers to the map.
-    
-    NASA GIBS (Global Imagery Browse Services) provides near real-time satellite imagery.
-    Layers include:
-    - True Color: Natural color satellite imagery
-    - Active Fires: Fire detection from VIIRS sensor
-    - Night Lights: Human settlements and activity at night
-    - Water Vapor: Atmospheric water vapor content
-    """
+    """Add NASA GIBS satellite imagery layers to the map."""
     date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
     layers_config = {
@@ -479,10 +453,84 @@ def calculate_disaster_impact(disaster_df, population_df, radius_km=50):
     return impacts
 
 def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use_location: bool = False, location: dict = None) -> str:
+    """
+    ✅ UPDATED: Validates if the query is emergency/disaster-related before providing guidance.
+    Rejects coding, homework, jokes, and other irrelevant questions.
+    """
     if not model:
         return """⚠️ **AI Not Available** - Please add your Gemini API key in settings."""
     
     try:
+        # ✅ STEP 1: Validate if the query is emergency/disaster-related
+        validation_prompt = f"""You are an emergency situation validator. Your ONLY job is to determine if the user's situation is a genuine EMERGENCY or DISASTER that requires immediate safety guidance.
+
+**DISASTER TYPE:** {disaster_type}
+**SITUATION:** {user_situation}
+
+✅ VALID EMERGENCY/DISASTER situations include:
+- Natural disasters: floods, earthquakes, wildfires, hurricanes, tsunamis, tornadoes, volcanoes, landslides, storms, avalanches
+- Life-threatening weather: severe storms, lightning, heatwaves, blizzards
+- Medical emergencies: injuries, poisoning, health crises during disasters
+- Dangerous animals: snake bites, wild animal attacks, insect swarms
+- Building/infrastructure emergencies: fire, gas leaks, chemical spills, structural collapse, explosions
+- Safety threats: being lost in wilderness, stranded, trapped
+- Environmental hazards: radiation, toxic exposure, water contamination
+- Mass casualty events
+- Evacuation situations
+- Search and rescue scenarios
+
+❌ INVALID (NOT emergencies):
+- Homework questions
+- Coding problems
+- Jokes or entertainment
+- General knowledge questions
+- Study help
+- Career advice
+- Relationship advice
+- Shopping recommendations
+- Sports scores
+- Movie/book recommendations
+- Historical facts (unless related to disaster preparedness)
+- Math problems
+- Science experiments (unless disaster-related)
+- Technology troubleshooting (unless emergency communication)
+
+CRITICAL RULES:
+- If the situation involves ANY immediate physical danger, safety threat, or natural disaster → Respond: "VALID"
+- If it's a coding question, homework, joke, or casual topic → Respond: "INVALID"
+- When in doubt about genuine danger → Respond: "VALID" (err on side of safety)
+
+Respond with ONLY ONE WORD: "VALID" or "INVALID"
+
+Response:"""
+
+        validation_response = model.generate_content(validation_prompt)
+        validation_result = validation_response.text.strip().upper()
+        
+        # ✅ STEP 2: If INVALID, return rejection message
+        if "INVALID" in validation_result:
+            return """⚠️ **Please Ask Emergency or Disaster-Related Questions Only**
+
+This AI assistant is designed **exclusively** for **life-threatening emergencies and disaster situations**.
+
+✅ **I CAN HELP WITH:**
+🌊 Floods, 🔥 Wildfires, ⛰️ Earthquakes, 🌀 Hurricanes, 🌪️ Tornadoes  
+🌋 Volcanoes, 🏔️ Landslides, ⚡ Severe Storms, ❄️ Blizzards  
+🐍 Snake/animal encounters, 🏗️ Building emergencies, 💥 Explosions  
+🚨 Gas leaks, ☣️ Chemical spills, 🆘 Search & rescue situations  
+🏥 Medical emergencies during disasters, 🧭 Being lost/stranded  
+
+❌ **I CANNOT HELP WITH:**
+- Coding or programming questions
+- Homework or study help
+- Jokes or entertainment
+- General knowledge questions
+- Technology troubleshooting (non-emergency)
+- Shopping, career, or relationship advice
+
+**If you're facing a real emergency, please describe your life-threatening situation.**"""
+        
+        # ✅ STEP 3: If VALID, proceed with emergency guidance
         location_context = ""
         emergency_numbers = ""
         
@@ -498,29 +546,32 @@ def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use
 🚒 Fire: {contacts['fire']}
 """
         
-        prompt = f"""You are an emergency disaster response expert. Provide IMMEDIATE, life-saving guidance.
+        prompt = f"""You are an emergency disaster response expert. Provide IMMEDIATE, life-saving guidance for genuine emergencies ONLY.
 
 **DISASTER TYPE:** {disaster_type}
 **SITUATION:** {user_situation}{location_context}
 
-Provide clear, actionable advice:
+Provide clear, actionable emergency advice:
 
 🚨 **IMMEDIATE ACTIONS:**
-[3-5 critical steps to take RIGHT NOW]
+[3-5 critical steps to take RIGHT NOW to ensure safety]
 
 ⚠️ **CRITICAL DON'Ts:**
-[3-4 dangerous actions to AVOID]
+[3-4 dangerous actions to AVOID that could make the situation worse]
 
 🏃 **EVACUATION CRITERIA:**
-[When to leave immediately vs shelter in place]
+[When to leave immediately vs shelter in place - be specific]
 
 📦 **ESSENTIAL ITEMS:**
-[Critical supplies to gather if possible]
+[Critical supplies to gather if time allows]
 
 ⏰ **URGENCY LEVEL:**
-[Immediate (minutes) / Urgent (hours) / Plan (days)]
+[Immediate (act within minutes) / Urgent (act within hours) / Plan (prepare over days)]
 
-Be concise and life-saving focused. NO extra commentary."""
+🆘 **IF SITUATION WORSENS:**
+[Signs to watch for and when to call emergency services]
+
+Be concise, direct, and focused on life-saving actions. NO extra commentary or pleasantries."""
 
         response = model.generate_content(prompt)
         return response.text + emergency_numbers
@@ -529,29 +580,89 @@ Be concise and life-saving focused. NO extra commentary."""
         return f"""⚠️ **AI Error:** {str(e)}
 
 **Basic Safety Steps:**
-1. 🚨 Call emergency services immediately
-2. 🏃 Follow official evacuation orders
-3. 📻 Stay informed via local news/radio
-4. 🆘 Move to safe location if threatened"""
+1. 🚨 Call emergency services immediately: 112 (International) / 911 (US/Canada)
+2. 🏃 Follow official evacuation orders from authorities
+3. 📻 Stay informed via local news, radio, or emergency alerts
+4. 🆘 Move to a safe location away from immediate danger
+5. 📱 Contact family and let them know your status"""
 
 def analyze_disaster_image(image, model, max_retries=2) -> dict:
+    """
+    ✅ UPDATED: Validates if the image is disaster/emergency-related before analysis.
+    """
     if not model:
         return {'success': False, 'message': 'Please add Gemini API key'}
     
-    prompt = """Analyze this disaster image as an expert assessor.
+    # ✅ STEP 1: Validate if image is disaster-related
+    validation_prompt = """You are an emergency image validator. Determine if this image shows a genuine disaster, emergency, or dangerous situation.
 
-Provide:
-**DISASTER TYPE:** [Type]
-**SEVERITY:** [LOW/MODERATE/HIGH/CRITICAL and why]
-**VISIBLE DAMAGES:** [List]
-**AFFECTED AREA:** [Estimate]
-**POPULATION RISK:** [Assessment]
-**IMMEDIATE CONCERNS:** [Top 3]
-**RESPONSE RECOMMENDATIONS:** [Actions needed]
-**RECOVERY TIME:** [Short/Medium/Long-term]"""
+✅ VALID disaster/emergency images:
+- Natural disasters (floods, fires, earthquakes, storms, hurricanes, tornadoes, etc.)
+- Disaster damage (destroyed buildings, infrastructure, flooding, fire damage)
+- Emergency situations (accidents, hazardous conditions, dangerous weather)
+- Dangerous animals in threatening situations
+- Environmental hazards (chemical spills, gas leaks, structural collapse)
 
+❌ INVALID (non-emergency) images:
+- Normal photos, selfies, landscapes
+- Memes, cartoons, or jokes
+- Screenshots of code or homework
+- Random objects or animals in non-threatening situations
+- Art, illustrations (unless depicting disaster safety)
+
+Respond with ONLY ONE WORD: "VALID" or "INVALID"
+
+Response:"""
+    
     for attempt in range(max_retries):
         try:
+            # Validate image first
+            validation_response = model.generate_content([validation_prompt, image])
+            validation_result = validation_response.text.strip().upper()
+            
+            # ✅ STEP 2: If INVALID, reject the image
+            if "INVALID" in validation_result:
+                return {
+                    'success': False,
+                    'message': """⚠️ **Please Upload Disaster or Emergency-Related Images Only**
+
+This tool analyzes images of:
+🌊 Floods, 🔥 Wildfires, ⛰️ Earthquakes, 🌀 Hurricanes, 🌪️ Tornadoes  
+🌋 Volcanoes, 🏗️ Disaster Damage, ⚡ Severe Storms, 💥 Explosions  
+🐍 Dangerous animal encounters, ☣️ Hazmat incidents
+
+❌ **I cannot analyze:**
+- Normal photos or selfies
+- Memes or jokes
+- Code screenshots
+- Non-emergency situations
+
+**Please upload an image showing actual disaster conditions or emergency situations.**"""
+                }
+            
+            # ✅ STEP 3: If VALID, proceed with disaster analysis
+            prompt = """Analyze this disaster/emergency image as an expert emergency assessor.
+
+Provide a detailed assessment:
+
+**DISASTER TYPE:** [Specific type of disaster or emergency]
+
+**SEVERITY:** [LOW/MODERATE/HIGH/CRITICAL with detailed reasoning]
+
+**VISIBLE DAMAGES:** [Specific list of damages observed]
+
+**AFFECTED AREA:** [Estimated area or scope of impact]
+
+**POPULATION RISK:** [Assessment of danger to people in the area]
+
+**IMMEDIATE CONCERNS:** [Top 3 most urgent safety issues]
+
+**RESPONSE RECOMMENDATIONS:** [Specific emergency actions needed]
+
+**RECOVERY TIME:** [Short-term (days) / Medium-term (weeks) / Long-term (months-years)]
+
+**SAFETY PRECAUTIONS:** [Critical safety measures for people in the area]"""
+
             response = model.generate_content([prompt, image])
             
             severity_map = {'LOW': 25, 'MODERATE': 50, 'HIGH': 75, 'CRITICAL': 95}
@@ -567,6 +678,7 @@ Provide:
                 'severity_score': severity_score,
                 'severity_level': 'CRITICAL' if severity_score > 80 else 'HIGH' if severity_score > 60 else 'MODERATE'
             }
+            
         except Exception as e:
             error_msg = str(e)
             
@@ -581,7 +693,7 @@ Provide:
                         'success': False,
                         'message': f"""⚠️ **Rate Limit Exceeded**
 
-Free tier quota hit. Please wait 2-3 minutes and try again."""
+Free tier quota hit. Please wait 2-3 minutes and try again, or upgrade your Gemini API plan."""
                     }
             else:
                 return {'success': False, 'message': f'Analysis failed: {error_msg[:300]}'}
@@ -906,37 +1018,46 @@ if menu == "🗺 Disaster Map":
 elif menu == "💬 AI Guidance":
     st.markdown("## 💬 AI Emergency Guidance")
     
+    st.info("⚠️ **This AI assistant ONLY responds to emergency and disaster-related questions.** Questions about coding, homework, jokes, or other non-emergency topics will be rejected.")
+    
     use_location = st.checkbox("📍 Use my location for guidance", value=False)
     
     if use_location and loc:
         st.info(f"🎯 Using: **{loc['city']}, {loc['country']}**")
     
     disaster_type = st.selectbox("Disaster Type", 
-        ["Flood", "Wildfire", "Earthquake", "Hurricane", "Tsunami", "Tornado", "Volcano", "Landslide", "Other"])
+        ["Flood", "Wildfire", "Earthquake", "Hurricane", "Tsunami", "Tornado", "Volcano", "Landslide", "Severe Storm", "Animal Encounter", "Building Emergency", "Other"])
     
-    user_situation = st.text_area("Describe your situation:",
-        placeholder="Be specific: What is happening? Number of people? Current conditions?",
+    user_situation = st.text_area("Describe your EMERGENCY situation:",
+        placeholder="Example: There's a snake in my house and I can't get out safely. What should I do?\n\nBe specific: What is happening? Number of people? Current conditions? Immediate dangers?",
         height=120)
     
     if st.button("🚨 GET AI GUIDANCE", type="primary", use_container_width=True):
         if not user_situation:
             st.error("❌ Please describe your situation")
         elif not st.session_state.gemini_model_text:
-            st.warning("⚠️ AI unavailable")
+            st.warning("⚠️ AI unavailable - please add Gemini API key")
         else:
-            with st.spinner("🤖 Analyzing..."):
+            with st.spinner("🤖 Analyzing your emergency situation..."):
                 guidance = get_ai_disaster_guidance(
                     disaster_type, user_situation, st.session_state.gemini_model_text,
                     use_location=use_location, location=loc if use_location else None
                 )
-                st.markdown(f'<div class="ai-response">{guidance}</div>', unsafe_allow_html=True)
+                
+                # Display response with appropriate styling
+                if "Please Ask Emergency" in guidance or "Please ask disaster-related" in guidance:
+                    st.markdown(f'<div class="warning-response">{guidance}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="ai-response">{guidance}</div>', unsafe_allow_html=True)
 
 elif menu == "🖼 Image Analysis":
     from PIL import Image
     
-    st.markdown("## 🖼 AI Image Analysis")
+    st.markdown("## 🖼 AI Disaster Image Analysis")
     
-    uploaded_file = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png'])
+    st.info("⚠️ **This tool ONLY analyzes disaster and emergency-related images.** Memes, selfies, code screenshots, or non-emergency images will be rejected.")
+    
+    uploaded_file = st.file_uploader("Upload disaster/emergency image", type=['jpg', 'jpeg', 'png'])
     
     if uploaded_file:
         image = Image.open(uploaded_file)
@@ -944,9 +1065,9 @@ elif menu == "🖼 Image Analysis":
         
         if st.button("🔍 ANALYZE", type="primary", use_container_width=True):
             if not st.session_state.gemini_model_image:
-                st.warning("⚠️ AI unavailable")
+                st.warning("⚠️ AI unavailable - please add Gemini API key")
             else:
-                with st.spinner("🤖 Analyzing..."):
+                with st.spinner("🤖 Analyzing disaster image..."):
                     result = analyze_disaster_image(image, st.session_state.gemini_model_image)
                     
                     if result['success']:
@@ -960,7 +1081,10 @@ elif menu == "🖼 Image Analysis":
                         
                         st.markdown(f'<div class="ai-response">{result["analysis"]}</div>', unsafe_allow_html=True)
                     else:
-                        st.error(result.get('message'))
+                        if "Please Upload Disaster" in result.get('message', ''):
+                            st.markdown(f'<div class="warning-response">{result.get("message")}</div>', unsafe_allow_html=True)
+                        else:
+                            st.error(result.get('message'))
 
 elif menu == "📊 Analytics":
     st.markdown("## 📊 Analytics Dashboard")
@@ -1024,3 +1148,4 @@ st.markdown("""
 🌍 <b>AI-RescueMap</b> • <b>HasnainAtif</b> @ NASA Space Apps 2025
 </p>
 """, unsafe_allow_html=True)
+```
