@@ -266,28 +266,89 @@ with st.sidebar:
     st.markdown("---")
     
     # Browser location button with working JavaScript
-    if st.button("Get Browser Location", use_container_width=True):
-        st.components.v1.html("""
-        <script>
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                function(pos) {
-                    const url = new URL(window.parent.location.href);
-                    url.searchParams.set('lat', pos.coords.latitude);
-                    url.searchParams.set('lon', pos.coords.longitude);
-                    window.parent.location.href = url.toString();
-                },
-                function(err) {
-                    alert('Location access denied or failed');
-                },
-                {enableHighAccuracy: true, timeout: 10000, maximumAge: 0}
-            );
-        } else {
-            alert('Geolocation not supported by your browser');
-        }
-        </script>
-        """, height=0)
+    # Browser location - WORKING METHOD
+st.markdown("### Get Browser Location")
+st.markdown("Click below to use your device's GPS/WiFi location:")
+
+# JavaScript that actually works in Streamlit
+location_component = """
+<button id="locBtn" style="
+    width:100%;
+    padding:12px;
+    background:#667eea;
+    color:white;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    font-size:16px;
+    font-weight:bold;
+">
+    📍 Use My Current Location
+</button>
+<p id="status" style="margin-top:10px;font-size:14px;color:#666;text-align:center;"></p>
+
+<script>
+document.getElementById('locBtn').onclick = function() {
+    const status = document.getElementById('status');
     
+    if (!navigator.geolocation) {
+        status.innerText = '❌ Geolocation not supported';
+        status.style.color = 'red';
+        return;
+    }
+    
+    status.innerText = '⏳ Getting your location...';
+    status.style.color = 'orange';
+    
+    navigator.geolocation.getCurrentPosition(
+        function(position) {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            
+            status.innerText = '✅ Location found! Page will reload...';
+            status.style.color = 'green';
+            
+            // Construct new URL with location parameters
+            const baseUrl = window.location.href.split('?')[0];
+            const newUrl = baseUrl + '?lat=' + lat + '&lon=' + lon;
+            
+            // Reload page with location data
+            setTimeout(function() {
+                window.location.href = newUrl;
+            }, 1000);
+        },
+        function(error) {
+            let msg = '❌ ';
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    msg += 'Permission denied. Enable location access in your browser settings.';
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    msg += 'Location unavailable. Check your device settings.';
+                    break;
+                case error.TIMEOUT:
+                    msg += 'Request timeout. Try again.';
+                    break;
+                default:
+                    msg += 'Unknown error occurred.';
+            }
+            status.innerText = msg;
+            status.style.color = 'red';
+        },
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+        }
+    );
+};
+</script>
+"""
+
+st.components.v1.html(location_component, height=120)
+
+st.caption("ℹ️ **Note:** Your browser will ask for location permission. You must allow it.")
+st.caption("🔒 Your location is only used for this session and never stored.")
     # Manual location
     st.markdown("---")
     with st.expander("Manual Location"):
