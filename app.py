@@ -1057,7 +1057,7 @@ if menu == "🗺 Disaster Map":
 if show_population:
     worldpop_df = read_worldpop_window(
         url=CONFIG["WORLDPOP_URL"],
-        path=CONFIG["WORLDPOP_PATH"],  # important: provide a real cache path
+        path=None,  # important: provide a real cache path
         center_lat=center_lat,
         center_lon=center_lon,
         radius_km=impact_radius,
