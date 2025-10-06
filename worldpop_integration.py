@@ -4,12 +4,34 @@ import requests
 import numpy as np
 import pandas as pd
 import streamlit as st
+import urllib.parse
 
 import rasterio
 from rasterio.windows import from_bounds
 from rasterio.warp import transform_bounds, transform
 from rasterio.transform import Affine
 from rasterio.enums import Resampling
+
+# Defaults so app.py can omit url/path entirely if desired
+WORLDPOP_URL_DEFAULT = "https://huggingface.co/datasets/HasnainAtif/worldpop_2024/resolve/main/global_pop_2024_CN_1km_R2025A_UA_v1.tif"
+WORLDPOP_DIR_DEFAULT = "data"  # local cache directory
+
+
+def _filename_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    name = os.path.basename(parsed.path) or "worldpop.tif"
+    # Ensure we end with .tif
+    if not name.lower().endswith(".tif"):
+        name += ".tif"
+    return name
+
+
+def _default_path_for_url(url: str | None) -> str:
+    os.makedirs(WORLDPOP_DIR_DEFAULT, exist_ok=True)
+    if url:
+        return os.path.join(WORLDPOP_DIR_DEFAULT, _filename_from_url(url))
+    # fallback filename if no url provided
+    return os.path.join(WORLDPOP_DIR_DEFAULT, "worldpop_2024_1km.tif")
 
 
 @st.cache_resource(show_spinner=False)
@@ -23,7 +45,6 @@ def download_worldpop_if_needed(url: str, target_path: str) -> str | None:
         if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
             return target_path
 
-        # Stream download
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
             tmp_path = target_path + ".part"
@@ -39,11 +60,17 @@ def download_worldpop_if_needed(url: str, target_path: str) -> str | None:
 
 
 @st.cache_resource(show_spinner=False)
-def open_worldpop(url: str, path: str):
+def open_worldpop(url: str | None = None, path: str | None = None):
     """
     Ensures the dataset is present locally and returns a rasterio dataset.
     Cached so it only opens once per session.
+
+    - If 'path' is None, a cache path is derived automatically from 'url'.
+    - If 'url' is None, a default URL is used.
     """
+    url = url or WORLDPOP_URL_DEFAULT
+    path = path or _default_path_for_url(url)
+
     local = path if os.path.exists(path) else download_worldpop_if_needed(url, path)
     if not local or not os.path.exists(local):
         return None
@@ -58,7 +85,6 @@ def latlon_bounds_from_center(center_lat: float, center_lon: float, radius_km: f
     """
     Returns a lon/lat bounding box expanded by radius_km around center.
     """
-    # Protect against extreme cos(lat) rounding near poles
     cos_lat = max(0.05, math.cos(math.radians(center_lat)))
     deg_lat = radius_km / 111.0
     deg_lon = radius_km / (111.0 * cos_lat)
@@ -70,8 +96,8 @@ def latlon_bounds_from_center(center_lat: float, center_lon: float, radius_km: f
 
 
 @st.cache_data(show_spinner=False)
-def read_worldpop_window(url: str,
-                         path: str,
+def read_worldpop_window(url: str | None,
+                         path: str | None,
                          center_lat: float,
                          center_lon: float,
                          radius_km: float,
@@ -79,7 +105,7 @@ def read_worldpop_window(url: str,
     """
     Reads a window from the WorldPop raster around the given center+radius.
 
-    - Prioritizes real data.
+    - Only URL is required; 'path' can be None. The file is auto-cached locally.
     - Uses Resampling.sum so total population is approximately conserved when downsampling.
     - Returns a DataFrame with columns: lat, lon, population (people per aggregated pixel).
     - Returns None if data not available for the requested window.
