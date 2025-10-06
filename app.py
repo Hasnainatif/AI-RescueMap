@@ -85,14 +85,14 @@ def geocode_location(city_or_address: str):
         
         if data and len(data) > 0:
             result = data[0]
-            display_name_parts = result.get('display_name', city_or_address).split(',')
+            display_parts = result.get('display_name', city_or_address).split(',')
             
             return {
                 'lat': float(result['lat']),
                 'lon': float(result['lon']),
-                'city': display_name_parts[0].strip() if len(display_name_parts) > 0 else 'Unknown',
-                'country': display_name_parts[-1].strip() if len(display_name_parts) > 0 else 'Unknown',
-                'region': display_name_parts[1].strip() if len(display_name_parts) > 1 else 'Unknown',
+                'city': display_parts[0].strip(),
+                'country': display_parts[-1].strip(),
+                'region': display_parts[1].strip() if len(display_parts) > 2 else display_parts[0].strip(),
                 'full_address': result.get('display_name', city_or_address),
                 'method': 'manual',
                 'source': 'Geocoded (Manual Entry)'
@@ -104,7 +104,7 @@ def geocode_location(city_or_address: str):
         return None
 
 # ✅ NEW: Reverse geocode lat/lon to address
-def reverse_geocode(lat, lon):
+def reverse_geocode(lat: float, lon: float):
     """Convert lat/lon to human-readable address"""
     try:
         params = {
@@ -117,43 +117,41 @@ def reverse_geocode(lat, lon):
         response = requests.get(CONFIG["REVERSE_GEOCODING_API"], params=params, headers=headers, timeout=5)
         data = response.json()
         
-        if data and 'address' in data:
-            address = data['address']
-            display_name = data.get('display_name', 'Unknown Location')
-            display_parts = display_name.split(',')
+        if 'address' in data:
+            addr = data['address']
+            display_parts = data.get('display_name', '').split(',')
             
             return {
                 'lat': lat,
                 'lon': lon,
-                'city': address.get('city') or address.get('town') or address.get('village') or display_parts[0].strip(),
-                'country': address.get('country', 'Unknown'),
-                'region': address.get('state') or address.get('region') or (display_parts[1].strip() if len(display_parts) > 1 else 'Unknown'),
-                'full_address': display_name,
+                'city': addr.get('city') or addr.get('town') or addr.get('village') or addr.get('county') or 'Unknown',
+                'country': addr.get('country', 'Unknown'),
+                'region': addr.get('state') or addr.get('region') or addr.get('province') or 'Unknown',
+                'full_address': data.get('display_name', f"{lat}, {lon}"),
                 'method': 'browser',
-                'source': 'Browser Geolocation (GPS/Wi-Fi)'
+                'source': 'Browser Geolocation'
             }
         else:
             return {
                 'lat': lat,
                 'lon': lon,
-                'city': f"Location ({lat:.4f}, {lon:.4f})",
+                'city': 'Unknown',
                 'country': 'Unknown',
                 'region': 'Unknown',
                 'full_address': f"{lat:.4f}, {lon:.4f}",
                 'method': 'browser',
-                'source': 'Browser Geolocation (GPS/Wi-Fi)'
+                'source': 'Browser Geolocation'
             }
     except Exception as e:
-        st.warning(f"Reverse geocoding failed: {e}")
         return {
             'lat': lat,
             'lon': lon,
-            'city': f"Location ({lat:.4f}, {lon:.4f})",
+            'city': 'Unknown',
             'country': 'Unknown',
             'region': 'Unknown',
             'full_address': f"{lat:.4f}, {lon:.4f}",
             'method': 'browser',
-            'source': 'Browser Geolocation (GPS/Wi-Fi)'
+            'source': 'Browser Geolocation'
         }
 
 # ✅ FIXED: Correct Gemini model names
@@ -229,7 +227,10 @@ def add_nasa_satellite_layers(folium_map, selected_layers):
     return folium_map
 
 def generate_population_data(center_lat, center_lon, radius_deg=2.0, num_points=1000):
-    np.random.seed(42)
+    # ✅ FIXED: Use location-specific seed for different cities
+    location_seed = int(abs(center_lat * 1000 + center_lon * 1000))
+    np.random.seed(location_seed)
+    
     num_centers = np.random.randint(2, 5)
     centers = [(center_lat + np.random.uniform(-radius_deg*0.7, radius_deg*0.7),
                 center_lon + np.random.uniform(-radius_deg*0.7, radius_deg*0.7),
@@ -282,7 +283,7 @@ def calculate_disaster_impact(disaster_df, population_df, radius_km=50):
         })
     return impacts
 
-def get_ai_disaster_guidance(disaster_type: str, user_situation: str, user_location: str, model) -> str:
+def get_ai_disaster_guidance(disaster_type: str, user_situation: str, location_info: dict, model) -> str:
     if not model:
         return """⚠️ **AI Not Available** - Please add your Gemini API key.
 
@@ -292,22 +293,23 @@ def get_ai_disaster_guidance(disaster_type: str, user_situation: str, user_locat
 - 🔴 Red Cross: 1-800-733-2767"""
     
     try:
+        location_context = f"\n\nUser Location: {location_info.get('city', 'Unknown')}, {location_info.get('region', 'Unknown')}, {location_info.get('country', 'Unknown')}"
+        
         prompt = f"""You are an emergency disaster response expert. Someone needs immediate help.
 
-Location: {user_location}
 Disaster: {disaster_type}
-Situation: {user_situation}
+Situation: {user_situation}{location_context}
 
-Provide IMMEDIATE, ACTIONABLE guidance specific to {user_location}:
+Provide IMMEDIATE, ACTIONABLE guidance specific to their location:
 
 🚨 IMMEDIATE ACTIONS:
-[List 3-5 specific steps for {user_location}]
+[List 3-5 specific steps relevant to {location_info.get('country', 'their country')}]
 
 ⚠️ CRITICAL DON'Ts:
 [List 3-4 dangerous actions to avoid]
 
 🏃 EVACUATION CRITERIA:
-[When to leave immediately - consider local geography]
+[When to leave immediately]
 
 📦 ESSENTIAL ITEMS:
 [Critical supplies to gather]
@@ -315,10 +317,10 @@ Provide IMMEDIATE, ACTIONABLE guidance specific to {user_location}:
 ⏰ URGENCY LEVEL:
 [Minutes/Hours/Days]
 
-📞 LOCAL EMERGENCY CONTACTS:
-[Include country-specific emergency numbers for {user_location}]
+📞 EMERGENCY CONTACTS FOR {location_info.get('country', 'THEIR COUNTRY').upper()}:
+[Specific emergency numbers for their country]
 
-Keep it clear and life-saving focused."""
+Keep it clear, location-specific, and life-saving focused."""
 
         response = model.generate_content(prompt)
         return response.text
@@ -390,22 +392,12 @@ Error: {error_msg[:200]}"""
     
     return {'success': False, 'message': 'Max retries exceeded'}
 
-# ✅ CRITICAL FIX: Get active location (manual overrides browser)
-def get_active_location():
-    """Returns the currently active location (manual if set, otherwise browser/fallback)"""
-    if st.session_state.get('manual_location'):
-        return st.session_state.manual_location
-    elif st.session_state.get('browser_location'):
-        return st.session_state.browser_location
-    else:
-        return None
+# ✅ FIXED: Initialize session state properly
+if 'user_location' not in st.session_state:
+    st.session_state.user_location = None
 
-# Initialize session state
-if 'manual_location' not in st.session_state:
-    st.session_state.manual_location = None
-
-if 'browser_location' not in st.session_state:
-    st.session_state.browser_location = None
+if 'location_source' not in st.session_state:
+    st.session_state.location_source = 'none'  # 'none', 'browser', 'manual'
 
 if 'gemini_model_text' not in st.session_state:
     st.session_state.gemini_model_text = None
@@ -413,7 +405,116 @@ if 'gemini_model_text' not in st.session_state:
 if 'gemini_model_image' not in st.session_state:
     st.session_state.gemini_model_image = None
 
-# ✅ IMPROVED SIDEBAR with browser geolocation
+# ✅ FIXED: Get current active location
+def get_active_location():
+    """Returns the currently active location (browser or manual)"""
+    return st.session_state.user_location
+
+# ✅ NEW: Browser Geolocation Component
+def browser_geolocation_component():
+    """JavaScript component to get browser's real GPS location"""
+    html_code = """
+    <div style="text-align: center; padding: 10px;">
+        <button id="getLocationBtn" style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        ">📍 Get My Real Location</button>
+        <p id="status" style="margin-top: 10px; font-size: 14px; color: #666;"></p>
+    </div>
+    
+    <script>
+    const btn = document.getElementById('getLocationBtn');
+    const status = document.getElementById('status');
+    
+    btn.onclick = () => {
+        if (!navigator.geolocation) {
+            status.innerText = '❌ Geolocation not supported';
+            status.style.color = 'red';
+            return;
+        }
+        
+        status.innerText = '🔍 Requesting location permission...';
+        status.style.color = '#667eea';
+        btn.disabled = true;
+        
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude.toFixed(6);
+                const lon = position.coords.longitude.toFixed(6);
+                const accuracy = position.coords.accuracy.toFixed(0);
+                
+                status.innerText = `✅ Location found! (±${accuracy}m accuracy)`;
+                status.style.color = 'green';
+                
+                // Reload page with coordinates
+                const url = new URL(window.location.href);
+                url.searchParams.set('browser_lat', lat);
+                url.searchParams.set('browser_lon', lon);
+                url.searchParams.set('_t', Date.now()); // Force refresh
+                window.location.href = url.toString();
+            },
+            (error) => {
+                let msg = '';
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        msg = '❌ Location permission denied';
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        msg = '❌ Location unavailable';
+                        break;
+                    case error.TIMEOUT:
+                        msg = '❌ Location request timeout';
+                        break;
+                    default:
+                        msg = '❌ Unknown error';
+                }
+                status.innerText = msg;
+                status.style.color = 'red';
+                btn.disabled = false;
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            }
+        );
+    };
+    </script>
+    """
+    
+    st.components.v1.html(html_code, height=100)
+
+# ✅ FIXED: Handle browser location from URL params
+query_params = st.query_params
+if 'browser_lat' in query_params and 'browser_lon' in query_params:
+    try:
+        browser_lat = float(query_params['browser_lat'])
+        browser_lon = float(query_params['browser_lon'])
+        
+        # Check if this is a NEW location (not same as current)
+        if (st.session_state.user_location is None or 
+            abs(st.session_state.user_location['lat'] - browser_lat) > 0.001 or 
+            abs(st.session_state.user_location['lon'] - browser_lon) > 0.001):
+            
+            with st.spinner("🌍 Getting location details..."):
+                location_data = reverse_geocode(browser_lat, browser_lon)
+                st.session_state.user_location = location_data
+                st.session_state.location_source = 'browser'
+            
+            # Clear URL params to prevent re-triggering
+            st.query_params.clear()
+            st.rerun()
+    except Exception as e:
+        st.error(f"Error processing browser location: {e}")
+
+# ✅ IMPROVED SIDEBAR
 with st.sidebar:
     st.image("https://www.nasa.gov/sites/default/files/thumbnails/image/nasa-logo-web-rgb.png", width=180)
     st.markdown("## 🌍 AI-RescueMap")
@@ -424,134 +525,36 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🎯 Your Location")
     
-    # ✅ Get active location
     loc = get_active_location()
     
     if loc:
-        location_badge = "📍 Manual" if loc.get('method') == 'manual' else "🌐 Browser GPS"
-        st.success(f"**{loc['city']}**")
+        # ✅ Show location with proper badge
+        badge = "🌐 Browser GPS" if loc.get('method') == 'browser' else "📍 Manual Entry"
+        
+        st.success(f"**{loc['city']}, {loc['region']}**")
         st.info(f"🌍 {loc['country']}")
-        st.caption(f"{location_badge} | {loc.get('source', 'Unknown')}")
+        st.caption(f"{badge} | {loc.get('source', 'Unknown')}")
         
         with st.expander("ℹ️ Details"):
-            st.caption(f"**Lat/Lon:** {loc['lat']:.4f}, {loc['lon']:.4f}")
-            st.caption(f"**Region:** {loc.get('region', 'N/A')}")
-            if loc.get('method') == 'manual':
-                st.caption(f"**Full Address:** {loc.get('full_address', 'N/A')}")
+            st.caption(f"**Coordinates:** {loc['lat']:.4f}, {loc['lon']:.4f}")
+            st.caption(f"**Full Address:** {loc.get('full_address', 'N/A')[:100]}")
     else:
-        st.warning("❌ No location set")
-        st.caption("Use browser GPS or enter manually below")
+        st.warning("⚠️ No location set")
+        st.caption("Use browser location or enter manually below")
     
-    # ✅ NEW: Browser Geolocation Button
+    # ✅ Browser Geolocation Section
     st.markdown("---")
-    st.markdown("### 📍 Get My Location")
-    st.caption("Uses your device's GPS/Wi-Fi")
+    st.markdown("### 🌐 Browser Location (GPS)")
+    st.caption("Most accurate - uses your device's GPS/WiFi")
     
-    # JavaScript to get browser location
-    browser_location_js = """
-    <script>
-    function getLocation() {
-        const btn = document.getElementById('geolocate-btn');
-        const status = document.getElementById('geo-status');
-        
-        btn.disabled = true;
-        btn.innerText = '⏳ Getting location...';
-        status.innerText = 'Requesting permission...';
-        
-        if (!navigator.geolocation) {
-            status.innerText = '❌ Geolocation not supported';
-            btn.disabled = false;
-            btn.innerText = '📍 Get My Location';
-            return;
-        }
-        
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const lat = position.coords.latitude.toFixed(6);
-                const lon = position.coords.longitude.toFixed(6);
-                const accuracy = position.coords.accuracy.toFixed(0);
-                
-                // Reload with coordinates in URL
-                const url = new URL(window.location.href);
-                url.searchParams.set('geo_lat', lat);
-                url.searchParams.set('geo_lon', lon);
-                url.searchParams.set('geo_accuracy', accuracy);
-                window.location.href = url.toString();
-            },
-            (error) => {
-                let msg = '';
-                switch(error.code) {
-                    case error.PERMISSION_DENIED:
-                        msg = '❌ Permission denied. Please allow location access.';
-                        break;
-                    case error.POSITION_UNAVAILABLE:
-                        msg = '❌ Location unavailable. Check GPS/Wi-Fi.';
-                        break;
-                    case error.TIMEOUT:
-                        msg = '❌ Request timeout. Try again.';
-                        break;
-                    default:
-                        msg = '❌ Unknown error: ' + error.message;
-                }
-                status.innerText = msg;
-                btn.disabled = false;
-                btn.innerText = '📍 Get My Location';
-            },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
-    }
-    </script>
-    <button id="geolocate-btn" onclick="getLocation()" style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        font-size: 16px;
-        font-weight: bold;
-        border-radius: 8px;
-        cursor: pointer;
-        width: 100%;
-        margin-bottom: 10px;
-    ">📍 Get My Location</button>
-    <p id="geo-status" style="color: #666; font-size: 12px; margin-top: 5px;"></p>
-    """
+    browser_geolocation_component()
     
-    st.components.v1.html(browser_location_js, height=120)
-    
-    # ✅ Process browser geolocation from URL params
-    query_params = st.query_params
-    if 'geo_lat' in query_params and 'geo_lon' in query_params:
-        try:
-            lat = float(query_params['geo_lat'])
-            lon = float(query_params['geo_lon'])
-            accuracy = float(query_params.get('geo_accuracy', 0))
-            
-            # Only update if coordinates changed
-            if (not st.session_state.browser_location or 
-                abs(st.session_state.browser_location['lat'] - lat) > 0.0001 or
-                abs(st.session_state.browser_location['lon'] - lon) > 0.0001):
-                
-                with st.spinner("🌍 Getting address..."):
-                    browser_loc = reverse_geocode(lat, lon)
-                    st.session_state.browser_location = browser_loc
-                    
-                    # Clear manual location when browser location is set
-                    st.session_state.manual_location = None
-                    
-                    # Clear URL params
-                    st.query_params.clear()
-                    st.success(f"✅ Located: {browser_loc['city']}, {browser_loc['country']}")
-                    time.sleep(1)
-                    st.rerun()
-        except Exception as e:
-            st.error(f"❌ Error processing location: {e}")
-    
-    # Manual location input
+    # ✅ Manual Location Section
     st.markdown("---")
-    st.markdown("### 🔧 Manual Location")
-    st.caption("🌍 Enter any city worldwide")
+    st.markdown("### 📍 Manual Location Entry")
+    st.caption("Works for ANY city worldwide")
     
-    with st.expander("📝 Enter Location"):
+    with st.expander("🔧 Enter Location Manually", expanded=False):
         st.info("**Examples:**\n"
                 "- Faisalabad, Pakistan\n"
                 "- New York, USA\n"
@@ -559,38 +562,39 @@ with st.sidebar:
                 "- London, UK")
         
         location_input = st.text_input(
-            "City/Country",
+            "City, Country",
             value="",
             placeholder="e.g., Faisalabad, Pakistan",
-            key="manual_input"
+            key="manual_location_input"
         )
         
-        col_btn1, col_btn2 = st.columns(2)
+        col1, col2 = st.columns(2)
         
-        with col_btn1:
+        with col1:
             if st.button("🔍 Find", use_container_width=True, disabled=not location_input):
-                if location_input:
-                    with st.spinner(f"🌍 Finding {location_input}..."):
-                        geocoded = geocode_location(location_input)
-                        if geocoded:
-                            st.session_state.manual_location = geocoded
-                            st.session_state.browser_location = None  # Clear browser location
-                            st.success(f"✅ {geocoded['city']}")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Not found. Try adding country name.")
+                with st.spinner(f"🌍 Finding {location_input}..."):
+                    geocoded = geocode_location(location_input)
+                    if geocoded:
+                        st.session_state.user_location = geocoded
+                        st.session_state.location_source = 'manual'
+                        st.success(f"✅ Found!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Location not found. Try adding country name.")
         
-        with col_btn2:
-            if st.session_state.manual_location and st.button("🔄 Clear", use_container_width=True):
-                st.session_state.manual_location = None
-                st.success("✅ Cleared")
-                time.sleep(0.3)
+        with col2:
+            if loc and st.button("🗑️ Clear", use_container_width=True):
+                st.session_state.user_location = None
+                st.session_state.location_source = 'none'
+                st.query_params.clear()
+                st.success("✅ Location cleared")
+                time.sleep(0.5)
                 st.rerun()
 
 # Main header
 st.markdown('<h1 class="main-header">AI-RescueMap 🌍</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Real-time disaster monitoring with NASA data & Google Gemini 2.5 AI</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Real-time disaster monitoring with NASA data & Google Gemini 2.0 AI</p>', unsafe_allow_html=True)
 
 # Setup Gemini models
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
@@ -600,14 +604,16 @@ if gemini_api_key:
     if st.session_state.gemini_model_image is None:
         st.session_state.gemini_model_image = setup_gemini(gemini_api_key, "image")
 
-# ✅ CRITICAL: Use active location everywhere
+# Get active location
 loc = get_active_location()
+
+# ========== MENU SECTIONS ==========
 
 if menu == "🗺 Disaster Map":
     with st.spinner("🛰 Fetching NASA EONET data..."):
         disasters = fetch_nasa_eonet_disasters()
     
-    # ✅ FIXED: Recalculate distances based on ACTIVE location
+    # ✅ FIXED: Calculate distances using active location
     if loc and not disasters.empty:
         disasters['distance_km'] = disasters.apply(
             lambda row: calculate_distance(loc['lat'], loc['lon'], row['lat'], row['lon']), 
@@ -639,15 +645,16 @@ if menu == "🗺 Disaster Map":
         map_options = ["My Location", "Global View"] + (disasters['title'].tolist()[:10] if not disasters.empty else [])
         map_center_option = st.selectbox("Center Map", map_options)
         
+        # ✅ FIXED: Proper map centering logic
         if map_center_option == "My Location" and loc:
             center_lat, center_lon, zoom = loc['lat'], loc['lon'], 8
         elif map_center_option == "Global View":
             center_lat, center_lon, zoom = 20, 0, 2
-        elif not disasters.empty:
+        elif not disasters.empty and map_center_option in disasters['title'].values:
             disaster_row = disasters[disasters['title'] == map_center_option].iloc[0]
             center_lat, center_lon, zoom = disaster_row['lat'], disaster_row['lon'], 8
         else:
-            center_lat, center_lon, zoom = 0, 0, 2
+            center_lat, center_lon, zoom = 20, 0, 2
         
         show_disasters = st.checkbox("Show Disasters", value=True)
         show_population = st.checkbox("Show Population", value=True)
@@ -726,9 +733,7 @@ elif menu == "💬 AI Guidance":
     st.markdown("## 💬 AI Emergency Guidance")
     
     if not loc:
-        st.warning("⚠️ Please set your location first (sidebar)")
-    else:
-        st.info(f"📍 Your location: **{loc['city']}, {loc['country']}**")
+        st.warning("⚠️ Please set your location first for location-specific guidance!")
     
     disaster_type = st.selectbox("Disaster Type", 
         ["Flood", "Wildfire", "Earthquake", "Hurricane", "Tsunami", "Tornado", "Volcano", "Other"])
@@ -743,9 +748,9 @@ elif menu == "💬 AI Guidance":
         elif not st.session_state.gemini_model_text:
             st.warning("⚠️ AI unavailable - Add GEMINI_API_KEY to secrets")
         else:
-            location_str = f"{loc['city']}, {loc['country']}" if loc else "your area"
             with st.spinner("🤖 Analyzing with Gemini 2.0..."):
-                guidance = get_ai_disaster_guidance(disaster_type, user_situation, location_str, st.session_state.gemini_model_text)
+                location_info = loc if loc else {'city': 'Unknown', 'country': 'Unknown', 'region': 'Unknown'}
+                guidance = get_ai_disaster_guidance(disaster_type, user_situation, location_info, st.session_state.gemini_model_text)
                 st.markdown(f'<div class="ai-response">{guidance}</div>', unsafe_allow_html=True)
                 
                 st.markdown("### 📞 Emergency Contacts")
@@ -792,16 +797,16 @@ elif menu == "🖼 Image Analysis":
 elif menu == "📊 Analytics":
     st.markdown("## 📊 Analytics Dashboard")
     
-    if not loc:
-        st.warning("⚠️ Please set your location first (sidebar)")
-        view_mode = "🌍 Global View"
-    else:
+    if loc:
         view_mode = st.radio("View Mode:", ["📍 My Location (Recommended)", "🌍 Global View"], horizontal=True)
+    else:
+        view_mode = "🌍 Global View"
+        st.info("Location unavailable - showing global view")
     
     with st.spinner("Loading disaster data..."):
         disasters = fetch_nasa_eonet_disasters(limit=100)
     
-    # ✅ FIXED: Recalculate distances for ACTIVE location
+    # ✅ FIXED: Calculate distances properly
     if not disasters.empty and loc:
         disasters['distance_km'] = disasters.apply(
             lambda row: calculate_distance(loc['lat'], loc['lon'], row['lat'], row['lon']), 
@@ -923,10 +928,9 @@ elif menu == "📊 Analytics":
 
 # Footer
 st.markdown("---")
-st.markdown(f"""
+st.markdown("""
 <p style='text-align: center; color: gray;'>
-Built by <b>HasnainAtif</b> (@{st.secrets.get('GITHUB_USER', 'Hasnainatif')}) for NASA Space Apps Challenge 2025<br>
-Powered by NASA EONET, NASA GIBS & Google Gemini 2.5 AI<br>
-<small>Current UTC: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}</small>
+Built by <b>HasnainAtif</b> for NASA Space Apps Challenge 2025<br>
+Powered by NASA EONET, NASA GIBS & Google Gemini 2.0 AI
 </p>
 """, unsafe_allow_html=True)
