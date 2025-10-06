@@ -45,7 +45,7 @@ def download_worldpop_if_needed(url: str, target_path: str) -> str | None:
         if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
             return target_path
 
-        with requests.get(url, stream=True, timeout=60) as r:
+        with requests.get(url, stream=True, timeout=300) as r:  # longer timeout for first download
             r.raise_for_status()
             tmp_path = target_path + ".part"
             with open(tmp_path, "wb") as f:
@@ -106,7 +106,7 @@ def read_worldpop_window(url: str | None,
     Reads a window from the WorldPop raster around the given center+radius.
 
     - Only URL is required; 'path' can be None. The file is auto-cached locally.
-    - Uses Resampling.sum so total population is approximately conserved when downsampling.
+    - Uses Resampling.average for reading, then scales by the aggregation factor to approximate sum.
     - Returns a DataFrame with columns: lat, lon, population (people per aggregated pixel).
     - Returns None if data not available for the requested window.
     """
@@ -141,13 +141,13 @@ def read_worldpop_window(url: str | None,
     try:
         window = from_bounds(inter_minx, inter_miny, inter_maxx, inter_maxy, transform=src.transform)
 
-        # Downsample safely for performance while conserving sums
+        # Downsample safely for performance
         out_h, out_w = out_size
         data = src.read(
             1,
             window=window,
             out_shape=(out_h, out_w),
-            resampling=Resampling.sum
+            resampling=Resampling.average  # sum is warp-only; use average for reads
         )
 
         # Compute transform for the resampled window
@@ -155,6 +155,10 @@ def read_worldpop_window(url: str | None,
         scale_y = window.height / out_h
         window_transform = src.window_transform(window)
         out_transform = window_transform * Affine.scale(scale_x, scale_y)
+
+        # Since we used average, multiply by number of source pixels aggregated into each output pixel
+        # to approximate a population sum per aggregated pixel.
+        data = data.astype(float) * (scale_x * scale_y)
 
         # Build coordinate grids (x, y in raster CRS)
         rows, cols = np.indices(data.shape)
@@ -187,7 +191,7 @@ def read_worldpop_window(url: str | None,
         df = pd.DataFrame({
             "lat": lat[mask].ravel(),
             "lon": lon[mask].ravel(),
-            "population": arr[mask].ravel()  # number of people per aggregated pixel
+            "population": arr[mask].ravel()  # approximate people per aggregated pixel
         })
 
         return df if len(df) > 0 else None
