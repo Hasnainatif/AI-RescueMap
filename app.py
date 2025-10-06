@@ -9,6 +9,9 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 
+# ✅ ADD: Import WorldPop integration
+from worldpop_integration import read_worldpop_window
+
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
 
 try:
@@ -64,12 +67,15 @@ st.markdown("""
 
 CONFIG = {
     "EONET_API": "https://eonet.gsfc.nasa.gov/api/v3/events",
-    "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",  # NASA satellite imagery
-    "IPAPI_URL": "https://ipapi.co/json/",  # Primary IP geolocation service
-    "IPAPI_BACKUP": "http://ip-api.com/json/",  # Backup IP geolocation service
-    "GEOCODING_API": "https://nominatim.openstreetmap.org/search",  # Primary geocoding
-    "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse",  # Reverse geocoding
-    "GEOCODING_BACKUP": "https://geocode.maps.co/search",  # Backup geocoding (no API key needed)
+    "GIBS_BASE": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best",
+    "IPAPI_URL": "https://ipapi.co/json/",
+    "IPAPI_BACKUP": "http://ip-api.com/json/",
+    "GEOCODING_API": "https://nominatim.openstreetmap.org/search",
+    "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse",
+    "GEOCODING_BACKUP": "https://geocode.maps.co/search",
+    # ✅ ADD: WorldPop configuration
+    "WORLDPOP_URL": "https://huggingface.co/datasets/HasnainAtif/worldpop_2024/resolve/main/global_pop_2024_CN_1km_R2025A_UA_v1.tif",
+    "WORLDPOP_PATH": "data/worldpop_2024_1km.tif",
 }
 
 # ✅ WORLDWIDE EMERGENCY CONTACTS DATABASE
@@ -101,17 +107,8 @@ def get_emergency_contacts(country: str) -> dict:
     """Get emergency contacts for a specific country"""
     return EMERGENCY_CONTACTS.get(country, EMERGENCY_CONTACTS["Default"])
 
-# ✅ FIXED: Geocode with MULTIPLE fallback services
 def geocode_location(city_or_address: str, max_retries=2):
-    """
-    Convert city/address to coordinates with multiple fallback services.
-    
-    Services used:
-    1. OpenStreetMap Nominatim (primary)
-    2. geocode.maps.co (backup - no API key needed)
-    3. If both fail, tries partial matches
-    """
-    # Try primary service (OpenStreetMap Nominatim)
+    """Convert city/address to coordinates with multiple fallback services."""
     for attempt in range(max_retries):
         try:
             params = {
@@ -142,21 +139,18 @@ def geocode_location(city_or_address: str, max_retries=2):
                         'source': 'OpenStreetMap'
                     }
             
-            # If rate limited, wait and retry
             if response.status_code == 429:
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
                     
         except requests.exceptions.ConnectionError:
-            # Connection refused - try backup service immediately
             break
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1)
                 continue
     
-    # ✅ Try backup service (geocode.maps.co)
     try:
         params = {
             'q': city_or_address,
@@ -184,7 +178,6 @@ def geocode_location(city_or_address: str, max_retries=2):
     except Exception as e:
         pass
     
-    # ✅ Final fallback: Try with country code only (approximate)
     country_coords = {
         'pakistan': {'lat': 30.3753, 'lon': 69.3451, 'city': 'Pakistan', 'region': 'Central'},
         'faisalabad': {'lat': 31.4504, 'lon': 73.1350, 'city': 'Faisalabad', 'region': 'Punjab'},
@@ -215,7 +208,6 @@ def geocode_location(city_or_address: str, max_retries=2):
     st.error(f"❌ Could not find location: {city_or_address}. Please try adding more details (e.g., 'City, Country')")
     return None
 
-# ✅ FIXED: Reverse geocode with retry logic
 def reverse_geocode(lat: float, lon: float, max_retries=2):
     """Convert coordinates to address with retry logic"""
     for attempt in range(max_retries):
@@ -255,7 +247,6 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
                 time.sleep(1)
                 continue
     
-    # Fallback: return coordinates without address
     return {
         'lat': lat,
         'lon': lon,
@@ -267,16 +258,8 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
         'source': 'GPS (No address found)'
     }
 
-# ✅ FIXED: IP-based fallback location
 def get_ip_location():
-    """
-    Get location from IP address (fallback only).
-    
-    Uses two services:
-    1. ipapi.co (https://ipapi.co/json/) - Primary, more accurate
-    2. ip-api.com (http://ip-api.com/json/) - Backup, free unlimited
-    """
-    # Try primary IP geolocation service
+    """Get location from IP address (fallback only)."""
     try:
         response = requests.get(CONFIG["IPAPI_URL"], timeout=5)
         data = response.json()
@@ -295,7 +278,6 @@ def get_ip_location():
     except:
         pass
     
-    # Try backup IP geolocation service
     try:
         response = requests.get(CONFIG["IPAPI_BACKUP"], timeout=5)
         data = response.json()
@@ -314,7 +296,6 @@ def get_ip_location():
     except:
         pass
     
-    # Last resort fallback
     return {
         'lat': 20.0,
         'lon': 0.0,
@@ -397,16 +378,7 @@ def fetch_nasa_eonet_disasters(status="open", limit=500):
         return pd.DataFrame()
 
 def add_nasa_satellite_layers(folium_map, selected_layers):
-    """
-    Add NASA GIBS satellite imagery layers to the map.
-    
-    NASA GIBS (Global Imagery Browse Services) provides near real-time satellite imagery.
-    Layers include:
-    - True Color: Natural color satellite imagery
-    - Active Fires: Fire detection from VIIRS sensor
-    - Night Lights: Human settlements and activity at night
-    - Water Vapor: Atmospheric water vapor content
-    """
+    """Add NASA GIBS satellite imagery layers to the map."""
     date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
     layers_config = {
@@ -424,6 +396,7 @@ def add_nasa_satellite_layers(folium_map, selected_layers):
     return folium_map
 
 def generate_population_data(center_lat, center_lon, radius_deg=2.0, num_points=1000):
+    """Fallback synthetic population generator"""
     seed_value = abs(int((center_lat * 1000 + center_lon * 1000))) % (2**31)
     np.random.seed(seed_value)
     
