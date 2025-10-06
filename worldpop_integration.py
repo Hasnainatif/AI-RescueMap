@@ -12,15 +12,14 @@ from rasterio.warp import transform_bounds, transform
 from rasterio.transform import Affine
 from rasterio.enums import Resampling
 
-# Defaults so app.py can omit url/path entirely if desired
+# Defaults: URL can be omitted in app.py; cache in /tmp for cloud-writability
 WORLDPOP_URL_DEFAULT = "https://huggingface.co/datasets/HasnainAtif/worldpop_2024/resolve/main/global_pop_2024_CN_1km_R2025A_UA_v1.tif"
-WORLDPOP_DIR_DEFAULT = "data"  # local cache directory
+WORLDPOP_DIR_DEFAULT = "/tmp"  # use /tmp to avoid repo write restrictions
 
 
 def _filename_from_url(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     name = os.path.basename(parsed.path) or "worldpop.tif"
-    # Ensure we end with .tif
     if not name.lower().endswith(".tif"):
         name += ".tif"
     return name
@@ -30,7 +29,6 @@ def _default_path_for_url(url: str | None) -> str:
     os.makedirs(WORLDPOP_DIR_DEFAULT, exist_ok=True)
     if url:
         return os.path.join(WORLDPOP_DIR_DEFAULT, _filename_from_url(url))
-    # fallback filename if no url provided
     return os.path.join(WORLDPOP_DIR_DEFAULT, "worldpop_2024_1km.tif")
 
 
@@ -45,7 +43,8 @@ def download_worldpop_if_needed(url: str, target_path: str) -> str | None:
         if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
             return target_path
 
-        with requests.get(url, stream=True, timeout=300) as r:  # longer timeout for first download
+        # Longer timeout on first download
+        with requests.get(url, stream=True, timeout=300) as r:
             r.raise_for_status()
             tmp_path = target_path + ".part"
             with open(tmp_path, "wb") as f:
@@ -101,14 +100,18 @@ def read_worldpop_window(url: str | None,
                          center_lat: float,
                          center_lon: float,
                          radius_km: float,
-                         out_size: tuple[int, int] = (200, 200)) -> pd.DataFrame | None:
+                         out_size: tuple[int, int] = (200, 200),
+                         cache_bust: int = 1) -> pd.DataFrame | None:
     """
     Reads a window from the WorldPop raster around the given center+radius.
 
     - Only URL is required; 'path' can be None. The file is auto-cached locally.
-    - Uses Resampling.average for reading, then scales by the aggregation factor to approximate sum.
+    - Uses Resampling.average for reading, then scales by the aggregation factor
+      to approximate sum of source pixels per output pixel.
     - Returns a DataFrame with columns: lat, lon, population (people per aggregated pixel).
     - Returns None if data not available for the requested window.
+
+    cache_bust: bump this integer to invalidate Streamlit cache after code changes.
     """
     src = open_worldpop(url, path)
     if src is None:
@@ -133,22 +136,20 @@ def read_worldpop_window(url: str | None,
     inter_miny = max(miny, ds_bounds.bottom)
     inter_maxx = min(maxx, ds_bounds.right)
     inter_maxy = min(maxy, ds_bounds.top)
-
     if inter_minx >= inter_maxx or inter_miny >= inter_maxy:
-        # Requested area not covered by dataset
         return None
 
     try:
         window = from_bounds(inter_minx, inter_miny, inter_maxx, inter_maxy, transform=src.transform)
 
-        # Downsample safely for performance
+        # Downsample for performance using average (sum is warp-only)
         out_h, out_w = out_size
         data = src.read(
             1,
             window=window,
             out_shape=(out_h, out_w),
-            resampling=Resampling.average  # sum is warp-only; use average for reads
-        )
+            resampling=Resampling.average
+        ).astype(float)
 
         # Compute transform for the resampled window
         scale_x = window.width / out_w
@@ -156,15 +157,14 @@ def read_worldpop_window(url: str | None,
         window_transform = src.window_transform(window)
         out_transform = window_transform * Affine.scale(scale_x, scale_y)
 
-        # Since we used average, multiply by number of source pixels aggregated into each output pixel
-        # to approximate a population sum per aggregated pixel.
-        data = data.astype(float) * (scale_x * scale_y)
+        # Convert average to approximate sum per aggregated output pixel
+        data *= (scale_x * scale_y)
 
         # Build coordinate grids (x, y in raster CRS)
         rows, cols = np.indices(data.shape)
         xs, ys = rasterio.transform.xy(out_transform, rows, cols, offset="center")
-        xs = np.array(xs)  # x/easting or lon
-        ys = np.array(ys)  # y/northing or lat
+        xs = np.array(xs)
+        ys = np.array(ys)
 
         # Convert to lon/lat if needed
         if src.crs and src.crs.to_string() != "EPSG:4326":
@@ -188,14 +188,11 @@ def read_worldpop_window(url: str | None,
         if not np.any(mask):
             return None
 
-        df = pd.DataFrame({
+        return pd.DataFrame({
             "lat": lat[mask].ravel(),
             "lon": lon[mask].ravel(),
-            "population": arr[mask].ravel()  # approximate people per aggregated pixel
+            "population": arr[mask].ravel()
         })
-
-        return df if len(df) > 0 else None
-
     except Exception as e:
         st.warning(f"WorldPop window read failed: {e}")
         return None
