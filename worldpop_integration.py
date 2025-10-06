@@ -4,32 +4,12 @@ import requests
 import numpy as np
 import pandas as pd
 import streamlit as st
-import urllib.parse
 
 import rasterio
 from rasterio.windows import from_bounds
 from rasterio.warp import transform_bounds, transform
 from rasterio.transform import Affine
 from rasterio.enums import Resampling
-
-# Defaults: URL can be omitted in app.py; cache in /tmp for cloud-writability
-WORLDPOP_URL_DEFAULT = "https://huggingface.co/datasets/HasnainAtif/worldpop_2024/resolve/main/global_pop_2024_CN_1km_R2025A_UA_v1.tif"
-WORLDPOP_DIR_DEFAULT = "/tmp"  # use /tmp to avoid repo write restrictions
-
-
-def _filename_from_url(url: str) -> str:
-    parsed = urllib.parse.urlparse(url)
-    name = os.path.basename(parsed.path) or "worldpop.tif"
-    if not name.lower().endswith(".tif"):
-        name += ".tif"
-    return name
-
-
-def _default_path_for_url(url: str | None) -> str:
-    os.makedirs(WORLDPOP_DIR_DEFAULT, exist_ok=True)
-    if url:
-        return os.path.join(WORLDPOP_DIR_DEFAULT, _filename_from_url(url))
-    return os.path.join(WORLDPOP_DIR_DEFAULT, "worldpop_2024_1km.tif")
 
 
 @st.cache_resource(show_spinner=False)
@@ -43,8 +23,8 @@ def download_worldpop_if_needed(url: str, target_path: str) -> str | None:
         if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
             return target_path
 
-        # Longer timeout on first download
-        with requests.get(url, stream=True, timeout=300) as r:
+        # Stream download
+        with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
             tmp_path = target_path + ".part"
             with open(tmp_path, "wb") as f:
@@ -59,17 +39,11 @@ def download_worldpop_if_needed(url: str, target_path: str) -> str | None:
 
 
 @st.cache_resource(show_spinner=False)
-def open_worldpop(url: str | None = None, path: str | None = None):
+def open_worldpop(url: str, path: str):
     """
     Ensures the dataset is present locally and returns a rasterio dataset.
     Cached so it only opens once per session.
-
-    - If 'path' is None, a cache path is derived automatically from 'url'.
-    - If 'url' is None, a default URL is used.
     """
-    url = url or WORLDPOP_URL_DEFAULT
-    path = path or _default_path_for_url(url)
-
     local = path if os.path.exists(path) else download_worldpop_if_needed(url, path)
     if not local or not os.path.exists(local):
         return None
@@ -84,6 +58,7 @@ def latlon_bounds_from_center(center_lat: float, center_lon: float, radius_km: f
     """
     Returns a lon/lat bounding box expanded by radius_km around center.
     """
+    # Protect against extreme cos(lat) rounding near poles
     cos_lat = max(0.05, math.cos(math.radians(center_lat)))
     deg_lat = radius_km / 111.0
     deg_lon = radius_km / (111.0 * cos_lat)
@@ -95,23 +70,19 @@ def latlon_bounds_from_center(center_lat: float, center_lon: float, radius_km: f
 
 
 @st.cache_data(show_spinner=False)
-def read_worldpop_window(url: str | None,
-                         path: str | None,
+def read_worldpop_window(url: str,
+                         path: str,
                          center_lat: float,
                          center_lon: float,
                          radius_km: float,
-                         out_size: tuple[int, int] = (200, 200),
-                         cache_bust: int = 1) -> pd.DataFrame | None:
+                         out_size: tuple[int, int] = (200, 200)) -> pd.DataFrame | None:
     """
     Reads a window from the WorldPop raster around the given center+radius.
 
-    - Only URL is required; 'path' can be None. The file is auto-cached locally.
-    - Uses Resampling.average for reading, then scales by the aggregation factor
-      to approximate sum of source pixels per output pixel.
+    - Prioritizes real data.
+    - Uses Resampling.sum so total population is approximately conserved when downsampling.
     - Returns a DataFrame with columns: lat, lon, population (people per aggregated pixel).
     - Returns None if data not available for the requested window.
-
-    cache_bust: bump this integer to invalidate Streamlit cache after code changes.
     """
     src = open_worldpop(url, path)
     if src is None:
@@ -136,20 +107,22 @@ def read_worldpop_window(url: str | None,
     inter_miny = max(miny, ds_bounds.bottom)
     inter_maxx = min(maxx, ds_bounds.right)
     inter_maxy = min(maxy, ds_bounds.top)
+
     if inter_minx >= inter_maxx or inter_miny >= inter_maxy:
+        # Requested area not covered by dataset
         return None
 
     try:
         window = from_bounds(inter_minx, inter_miny, inter_maxx, inter_maxy, transform=src.transform)
 
-        # Downsample for performance using average (sum is warp-only)
+        # Downsample safely for performance while conserving sums
         out_h, out_w = out_size
         data = src.read(
             1,
             window=window,
             out_shape=(out_h, out_w),
-            resampling=Resampling.average
-        ).astype(float)
+            resampling=Resampling.sum
+        )
 
         # Compute transform for the resampled window
         scale_x = window.width / out_w
@@ -157,22 +130,17 @@ def read_worldpop_window(url: str | None,
         window_transform = src.window_transform(window)
         out_transform = window_transform * Affine.scale(scale_x, scale_y)
 
-        # Convert average to approximate sum per aggregated output pixel
-        data *= (scale_x * scale_y)
-
-        # Build coordinate grids shaped like data
-        h, w = data.shape
-        rr, cc = np.indices((h, w))
-        # Call xy on flattened indices, then reshape back to (h, w)
-        x_list, y_list = rasterio.transform.xy(out_transform, rr.ravel(), cc.ravel(), offset="center")
-        xs = np.asarray(x_list).reshape(h, w)
-        ys = np.asarray(y_list).reshape(h, w)
+        # Build coordinate grids (x, y in raster CRS)
+        rows, cols = np.indices(data.shape)
+        xs, ys = rasterio.transform.xy(out_transform, rows, cols, offset="center")
+        xs = np.array(xs)  # x/easting or lon
+        ys = np.array(ys)  # y/northing or lat
 
         # Convert to lon/lat if needed
         if src.crs and src.crs.to_string() != "EPSG:4326":
             lon_flat, lat_flat = transform(src.crs, "EPSG:4326", xs.ravel().tolist(), ys.ravel().tolist())
-            lon = np.array(lon_flat).reshape(h, w)
-            lat = np.array(lat_flat).reshape(h, w)
+            lon = np.array(lon_flat).reshape(xs.shape)
+            lat = np.array(lat_flat).reshape(ys.shape)
         else:
             lon, lat = xs, ys
 
@@ -190,11 +158,14 @@ def read_worldpop_window(url: str | None,
         if not np.any(mask):
             return None
 
-        return pd.DataFrame({
+        df = pd.DataFrame({
             "lat": lat[mask].ravel(),
             "lon": lon[mask].ravel(),
-            "population": arr[mask].ravel()
+            "population": arr[mask].ravel()  # number of people per aggregated pixel
         })
+
+        return df if len(df) > 0 else None
+
     except Exception as e:
         st.warning(f"WorldPop window read failed: {e}")
         return None
