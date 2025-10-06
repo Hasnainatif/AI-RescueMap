@@ -160,17 +160,19 @@ def read_worldpop_window(url: str | None,
         # Convert average to approximate sum per aggregated output pixel
         data *= (scale_x * scale_y)
 
-        # Build coordinate grids (x, y in raster CRS)
-        rows, cols = np.indices(data.shape)
-        xs, ys = rasterio.transform.xy(out_transform, rows, cols, offset="center")
-        xs = np.array(xs)
-        ys = np.array(ys)
+        # Build coordinate grids shaped like data
+        h, w = data.shape
+        rr, cc = np.indices((h, w))
+        # Call xy on flattened indices, then reshape back to (h, w)
+        x_list, y_list = rasterio.transform.xy(out_transform, rr.ravel(), cc.ravel(), offset="center")
+        xs = np.asarray(x_list).reshape(h, w)
+        ys = np.asarray(y_list).reshape(h, w)
 
         # Convert to lon/lat if needed
         if src.crs and src.crs.to_string() != "EPSG:4326":
             lon_flat, lat_flat = transform(src.crs, "EPSG:4326", xs.ravel().tolist(), ys.ravel().tolist())
-            lon = np.array(lon_flat).reshape(xs.shape)
-            lat = np.array(lat_flat).reshape(ys.shape)
+            lon = np.array(lon_flat).reshape(h, w)
+            lat = np.array(lat_flat).reshape(h, w)
         else:
             lon, lat = xs, ys
 
