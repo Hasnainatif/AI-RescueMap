@@ -1261,6 +1261,6 @@ elif menu == "📊 Analytics":
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: gray;'>
-🌍 <b>AI-RescueMap</b> • <b>HasnainAtif</b> @ NASA Space Apps 2025
+🌍 <b>AI-RescueMap</b> • <b>created by HasnainAtif</b> @ NASA Space Apps 2025
 </p>
 """, unsafe_allow_html=True)
