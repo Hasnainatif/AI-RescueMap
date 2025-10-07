@@ -1070,7 +1070,7 @@ if menu == "🗺 Disaster Map":
                 st.info("ℹ️ Real WorldPop data not available for this region, using estimated data")
                 pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
             else:
-                st.success(f"✅ Using real WorldPop 2024 data: {len(pop_df):,} population points")
+                st.success(f"✅WorldPop data: {len(pop_df):,} population points")
                       # Create heatmap if data exists
             if pop_df is not None and len(pop_df) > 0:
                 heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
