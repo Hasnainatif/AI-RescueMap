@@ -12,3 +12,4 @@ rasterio
 geopy
 streamlit-geolocation
 streamlit-javascript
+scipy
