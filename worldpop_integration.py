@@ -80,7 +80,7 @@ def read_worldpop_window(url: str,
     Reads a window from the WorldPop raster around the given center+radius.
 
     - Prioritizes real data.
-    - Uses Resampling.average to preserve population density when downsampling.
+    - Uses Resampling.average to preserve population density.
     - Returns a DataFrame with columns: lat, lon, population (people per aggregated pixel).
     - Returns None if data not available for the requested window.
     """
@@ -115,36 +115,59 @@ def read_worldpop_window(url: str,
     try:
         window = from_bounds(inter_minx, inter_miny, inter_maxx, inter_maxy, transform=src.transform)
 
-        # Downsample safely for performance while preserving population density
+        # ✅ FIX: Read data without resampling parameter (not supported for direct reads)
+        # Read at native resolution first
+        data = src.read(1, window=window)
+        
+        # ✅ FIX: Manually resample if needed using array operations
         out_h, out_w = out_size
-        # ✅ FIXED: Changed from Resampling.sum to Resampling.average
-        # Resampling.sum cannot be used for direct reads, only for warp operations
-        data = src.read(
-            1,
-            window=window,
-            out_shape=(out_h, out_w),
-            resampling=Resampling.average  # ✅ This works correctly for direct reads
-        )
+        if data.shape != (out_h, out_w):
+            from scipy.ndimage import zoom
+            # Calculate zoom factors
+            zoom_h = out_h / data.shape[0]
+            zoom_w = out_w / data.shape[1]
+            # Resample using zoom (preserves population density with order=1 bilinear)
+            data = zoom(data, (zoom_h, zoom_w), order=1)
 
         # Compute transform for the resampled window
+        window_transform = src.window_transform(window)
         scale_x = window.width / out_w
         scale_y = window.height / out_h
-        window_transform = src.window_transform(window)
         out_transform = window_transform * Affine.scale(scale_x, scale_y)
 
+        # ✅ FIX: Ensure data is 2D before creating coordinate grids
+        if data.ndim == 1:
+            # If somehow 1D, reshape to 2D
+            side = int(np.sqrt(len(data)))
+            data = data.reshape((side, side))
+        
         # Build coordinate grids (x, y in raster CRS)
         rows, cols = np.indices(data.shape)
-        xs, ys = rasterio.transform.xy(out_transform, rows, cols, offset="center")
-        xs = np.array(xs)  # x/easting or lon
-        ys = np.array(ys)  # y/northing or lat
+        
+        # ✅ FIX: Handle coordinate transformation properly
+        # Create meshgrid of pixel coordinates
+        row_coords = np.arange(data.shape[0])
+        col_coords = np.arange(data.shape[1])
+        
+        # Transform pixel coordinates to geographic coordinates
+        xs, ys = rasterio.transform.xy(out_transform, row_coords, col_coords, offset="center")
+        
+        # Create full coordinate grids
+        lon_grid = np.tile(xs, (data.shape[0], 1))
+        lat_grid = np.tile(ys, (data.shape[1], 1)).T
 
         # Convert to lon/lat if needed
         if src.crs and src.crs.to_string() != "EPSG:4326":
-            lon_flat, lat_flat = transform(src.crs, "EPSG:4326", xs.ravel().tolist(), ys.ravel().tolist())
-            lon = np.array(lon_flat).reshape(xs.shape)
-            lat = np.array(lat_flat).reshape(ys.shape)
+            lon_flat, lat_flat = transform(
+                src.crs, 
+                "EPSG:4326", 
+                lon_grid.ravel().tolist(), 
+                lat_grid.ravel().tolist()
+            )
+            lon = np.array(lon_flat).reshape(lon_grid.shape)
+            lat = np.array(lat_flat).reshape(lat_grid.shape)
         else:
-            lon, lat = xs, ys
+            lon, lat = lon_grid, lat_grid
 
         arr = np.array(data, dtype=float)
 
