@@ -1260,100 +1260,100 @@ elif menu == "📊 Analytics":
         with col_a:
             st.markdown("### 📊 By Category")
             st.bar_chart(disasters_display['category'].value_counts())
-        
         with col_b:
-            st.markdown("### 📅 Recent")
-            cols = ['title', 'category', 'date']
-            if 'distance_km' in disasters_display.columns:
-                cols.append('distance_km')
-            
-            # ✅ CHANGED: Show ALL data instead of head(10)
-            st.dataframe(
-                disasters_display[cols], 
-                use_container_width=True, 
-                hide_index=True,
-                height=400
-            )
-              st.caption(f"📊 Showing all {len(disasters_display)} disasters")
-        
-                 st.markdown("---")
-        
-        # ✅ NEW: Add Interactive Map in Analytics
-        st.markdown("### 🗺️ Disaster Distribution Map")
-        
-        if "My Location" in view_mode and loc:
-            map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 6
-        else:
-            map_center_lat, map_center_lon, map_zoom = 20, 0, 2
-        
-        analytics_map = folium.Map(
-            location=[map_center_lat, map_center_lon], 
-            zoom_start=map_zoom, 
-            tiles='CartoDB positron'
-        )
-        
-        if not disasters_display.empty:
-            marker_cluster = MarkerCluster().add_to(analytics_map)
-            color_map = {
-                'Wildfires': 'red', 
-                'Severe Storms': 'orange', 
-                'Floods': 'blue', 
-                'Earthquakes': 'darkred', 
-                'Volcanoes': 'red', 
-                'Sea and Lake Ice': 'lightblue',
-                'Snow': 'white', 
-                'Dust and Haze': 'brown', 
-                'Manmade': 'gray'
-            }
-            
-            for _, disaster in disasters_display.iterrows():
-                color = color_map.get(disaster['category'], 'gray')
-                distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
-                
-                folium.Marker(
-                    location=[disaster['lat'], disaster['lon']],
-                    popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
-                    icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
-                    tooltip=disaster['title']
-                ).add_to(marker_cluster)
-        
-        # Add user location marker if in "My Location" mode
-        if "My Location" in view_mode and loc:
-            folium.Marker(
-                location=[loc['lat'], loc['lon']],
-                popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
-                icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
-                tooltip="Your Location"
-            ).add_to(analytics_map)
-            
-            # Add radius circle if in location mode
-            if 'radius' in locals():
-                folium.Circle(
-                    location=[loc['lat'], loc['lon']],
-                    radius=radius * 1000,
-                    color='green',
-                    fill=True,
-                    fillOpacity=0.1,
-                    popup=f"Search Radius: {radius} km"
-                ).add_to(analytics_map)
-        
-        folium.LayerControl().add_to(analytics_map)
-        st_folium(analytics_map, width=1200, height=500)
-        
-        st.markdown("---")
-        
-        st.download_button(
-            "📥 Download CSV",
-            disasters_display.to_csv(index=False).encode('utf-8'),
-            f"disasters_{datetime.now().strftime('%Y%m%d')}.csv",
-            "text/csv"
-        )
+    st.markdown("### 📅 Recent")
+    cols = ['title', 'category', 'date']
+    if 'distance_km' in disasters_display.columns:
+        cols.append('distance_km')
+    
+    # ✅ CHANGED: Show ALL data instead of head(10)
+    st.dataframe(
+        disasters_display[cols], 
+        use_container_width=True, 
+        hide_index=True,
+        height=400
+    )
+    st.caption(f"📊 Showing all {len(disasters_display)} disasters")
+
+    st.markdown("---")
+    
+    # ✅ NEW: Add Interactive Map in Analytics
+    st.markdown("### 🗺️ Disaster Distribution Map")
+    
+    if "My Location" in view_mode and loc:
+        map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 6
     else:
-        st.warning("⚠️ No disasters found for the selected criteria")
+        map_center_lat, map_center_lon, map_zoom = 20, 0, 2
+    
+    analytics_map = folium.Map(
+        location=[map_center_lat, map_center_lon], 
+        zoom_start=map_zoom, 
+        tiles='CartoDB positron'
+    )
+    
+    if not disasters_display.empty:
+        marker_cluster = MarkerCluster().add_to(analytics_map)
+        color_map = {
+            'Wildfires': 'red', 
+            'Severe Storms': 'orange', 
+            'Floods': 'blue', 
+            'Earthquakes': 'darkred', 
+            'Volcanoes': 'red', 
+            'Sea and Lake Ice': 'lightblue',
+            'Snow': 'white', 
+            'Dust and Haze': 'brown', 
+            'Manmade': 'gray'
+        }
+        
+        for _, disaster in disasters_display.iterrows():
+            color = color_map.get(disaster['category'], 'gray')
+            distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
+            
+            folium.Marker(
+                location=[disaster['lat'], disaster['lon']],
+                popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
+                icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
+                tooltip=disaster['title']
+            ).add_to(marker_cluster)
+    
+    # Add user location marker if in "My Location" mode
+    if "My Location" in view_mode and loc:
+        folium.Marker(
+            location=[loc['lat'], loc['lon']],
+            popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
+            icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
+            tooltip="Your Location"
+        ).add_to(analytics_map)
+        
+        # Add radius circle if in location mode
+        if 'radius' in locals():
+            folium.Circle(
+                location=[loc['lat'], loc['lon']],
+                radius=radius * 1000,
+                color='green',
+                fill=True,
+                fillOpacity=0.1,
+                popup=f"Search Radius: {radius} km"
+            ).add_to(analytics_map)
+    
+    folium.LayerControl().add_to(analytics_map)
+    st_folium(analytics_map, width=1200, height=500)
+    
+    st.markdown("---")
+    
+    st.download_button(
+        "📥 Download CSV",
+        disasters_display.to_csv(index=False).encode('utf-8'),
+        f"disasters_{datetime.now().strftime('%Y%m%d')}.csv",
+        "text/csv"
+    )
+else:
+    st.warning("⚠️ No disasters found for the selected criteria")
 
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: gray;'>
 🌍 <b>AI-RescueMap</b> • <b>created by HasnainAtif</b> @ NASA Space Apps 2025
 </p>
-""", unsafe_allow_html=True)        
+""", unsafe_allow_html=True)
+        
