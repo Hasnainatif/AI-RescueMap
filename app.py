@@ -1224,8 +1224,7 @@ elif menu == "📊 Analytics":
         with col2:
             st.metric("🔥 Wildfires", len(disasters[disasters['category'] == 'Wildfires']))
         with col3:
-             st.metric("⛈️ Severe Storms", len(disasters_display[disasters_display['category'] == 'Severe Storms']))
-       
+             st.metric("🌊 Floods", len(disasters[disasters['category'] == 'Floods']))
         with col4:
             st.metric("⛰️ Earthquakes", len(disasters[disasters['category'] == 'Earthquakes']))
         col5, col6, col7, col8 = st.columns(4)
