@@ -1052,12 +1052,31 @@ if menu == "🗺 Disaster Map":
         
         if satellite_layers:
             m = add_nasa_satellite_layers(m, satellite_layers)
-        
         if show_population:
-            pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
-            heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
-            HeatMap(heat_data, radius=15, blur=25, max_zoom=13, 
-                   gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}).add_to(m)
+          # ✅ USE REAL WORLDPOP DATA
+          with st.spinner("📊 Loading WorldPop data..."):
+            pop_df = read_worldpop_window(
+            url=CONFIG["WORLDPOP_URL"],
+            path=CONFIG["WORLDPOP_PATH"],
+            center_lat=center_lat,
+            center_lon=center_lon,
+            radius_km=150,  # 150km radius of real data
+            out_size=(300, 300)  # Higher resolution
+        )
+    
+    # Fallback to synthetic data if WorldPop unavailable
+        if pop_df is None or len(pop_df) == 0:
+          st.info("ℹ️ Real WorldPop data not available for this region, using estimated data")
+          pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
+        else:
+          st.success(f"✅ Using real WorldPop 2024 data: {len(pop_df):,} population points")
+    
+          # Create heatmap
+        if pop_df is not None and len(pop_df) > 0:
+           heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
+           HeatMap(heat_data, radius=15, blur=25, max_zoom=13, 
+               gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}).add_to(m)
+       
         
         if show_disasters and not disasters.empty:
             marker_cluster = MarkerCluster().add_to(m)
