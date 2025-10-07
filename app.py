@@ -1224,10 +1224,15 @@ elif menu == "📊 Analytics":
         with col2:
             st.metric("🔥 Wildfires", len(disasters[disasters['category'] == 'Wildfires']))
         with col3:
-            st.metric("🌊 Floods", len(disasters[disasters['category'] == 'Floods']))
+             st.metric("⛈️ Severe Storms", len(disasters_display[disasters_display['category'] == 'Severe Storms']))
+       
         with col4:
             st.metric("⛰️ Earthquakes", len(disasters[disasters['category'] == 'Earthquakes']))
-        
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            main_categories = ['Wildfires', 'Severe Storms', 'Earthquakes']
+            other_count = len(disasters_display[~disasters_display['category'].isin(main_categories)])
+            st.metric("🌪️ Other Disasters", other_count)
         st.markdown("---")
         
         col_a, col_b = st.columns(2)
