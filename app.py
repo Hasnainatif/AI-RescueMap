@@ -1029,12 +1029,25 @@ if menu == "🗺 Disaster Map":
         
         map_center_option = st.selectbox("Center Map", map_options)
         
+        # ✅ NEW: Disaster Type Filter
+        disaster_categories = ["All Disasters"]
+        if not disasters.empty:
+            unique_categories = sorted(disasters['category'].unique().tolist())
+            disaster_categories.extend(unique_categories)
+        
+        disaster_filter = st.selectbox("🔍 Filter by Disaster Type", disaster_categories)
+        
+        # ✅ Apply disaster filter
+        disasters_filtered = disasters.copy()
+        if disaster_filter != "All Disasters":
+            disasters_filtered = disasters_filtered[disasters_filtered['category'] == disaster_filter]
+        
         if map_center_option == "My Location" and loc:
             center_lat, center_lon, zoom = loc['lat'], loc['lon'], 8
         elif map_center_option == "Global View":
             center_lat, center_lon, zoom = 20, 0, 2
-        elif not disasters.empty and map_center_option in disasters['title'].values:
-            disaster_row = disasters[disasters['title'] == map_center_option].iloc[0]
+        elif not disasters_filtered.empty and map_center_option in disasters_filtered['title'].values:
+            disaster_row = disasters_filtered[disasters_filtered['title'] == map_center_option].iloc[0]
             center_lat, center_lon, zoom = disaster_row['lat'], disaster_row['lon'], 8
         else:
             center_lat, center_lon, zoom = 20, 0, 2
@@ -1046,6 +1059,10 @@ if menu == "🗺 Disaster Map":
                                          ['True Color', 'Active Fires', 'Night Lights'], 
                                          default=['True Color'])
         impact_radius = st.slider("Impact Radius (km)", 10, 200, 50)
+        
+        # ✅ Display filter info
+        if disaster_filter != "All Disasters":
+            st.info(f"📊 Showing {len(disasters_filtered)} {disaster_filter} disasters")
     
     with col_map:
         m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles='CartoDB positron')
@@ -1053,7 +1070,6 @@ if menu == "🗺 Disaster Map":
         if satellite_layers:
             m = add_nasa_satellite_layers(m, satellite_layers)
         
-        # ✅ FIXED INDENTATION - USE REAL WORLDPOP DATA
         if show_population:
             with st.spinner("📊 Loading WorldPop data..."):
                 pop_df = read_worldpop_window(
@@ -1061,29 +1077,28 @@ if menu == "🗺 Disaster Map":
                     path=CONFIG["WORLDPOP_PATH"],
                     center_lat=center_lat,
                     center_lon=center_lon,
-                    radius_km=150,  # 150km radius of real data
-                    out_size=(300, 300)  # Higher resolution
+                    radius_km=150,
+                    out_size=(300, 300)
                 )
             
-            # Fallback to synthetic data if WorldPop unavailable
             if pop_df is None or len(pop_df) == 0:
                 st.info("ℹ️ Real WorldPop data not available for this region, using estimated data")
                 pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
             else:
-                st.success(f"✅WorldPop data: {len(pop_df):,} population points")
-                      # Create heatmap if data exists
+                st.success(f"✅ Using real WorldPop 2024 data: {len(pop_df):,} population points")
+            
             if pop_df is not None and len(pop_df) > 0:
                 heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
                 HeatMap(heat_data, radius=15, blur=25, max_zoom=13, 
                        gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}).add_to(m)
         
-        if show_disasters and not disasters.empty:
+        if show_disasters and not disasters_filtered.empty:
             marker_cluster = MarkerCluster().add_to(m)
             color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 
                         'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
                         'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
             
-            for _, disaster in disasters.iterrows():
+            for _, disaster in disasters_filtered.iterrows():
                 color = color_map.get(disaster['category'], 'gray')
                 distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
                 
@@ -1107,10 +1122,10 @@ if menu == "🗺 Disaster Map":
         folium.LayerControl().add_to(m)
         st_folium(m, width=1000, height=600)
     
-    if show_disasters and show_population and not disasters.empty and 'pop_df' in locals():
+    if show_disasters and show_population and not disasters_filtered.empty and 'pop_df' in locals():
         st.markdown("---")
         st.markdown("### 📊 Population Impact Analysis")
-        impacts = calculate_disaster_impact(disasters, pop_df, impact_radius)
+        impacts = calculate_disaster_impact(disasters_filtered, pop_df, impact_radius)
         
         if impacts:
             impact_df = pd.DataFrame(impacts)
@@ -1210,52 +1225,135 @@ elif menu == "📊 Analytics":
             axis=1
         )
     
+    # ✅ Filter based on view mode
+    disasters_display = disasters.copy()
     if "My Location" in view_mode and loc and not disasters.empty:
         radius = st.slider("Radius (km)", 100, 5000, 1000, step=100)
-        disasters = disasters[disasters['distance_km'] <= radius].sort_values('distance_km')
-        st.success(f"📍 {len(disasters)} disasters within {radius} km")
+        disasters_display = disasters_display[disasters_display['distance_km'] <= radius].sort_values('distance_km')
+        st.success(f"📍 {len(disasters_display)} disasters within {radius} km")
     else:
-        st.info(f"🌍 Showing {len(disasters)} global disasters")
+        st.info(f"🌍 Showing {len(disasters_display)} global disasters")
     
-    if not disasters.empty:
+    if not disasters_display.empty:
+        # ✅ UPDATED METRICS
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("🌍 Total", len(disasters))
+            st.metric("🌍 Total", len(disasters_display))
         with col2:
-            st.metric("🔥 Wildfires", len(disasters[disasters['category'] == 'Wildfires']))
+            st.metric("🔥 Wildfires", len(disasters_display[disasters_display['category'] == 'Wildfires']))
         with col3:
-             st.metric("🌊 Floods", len(disasters[disasters['category'] == 'Floods']))
+            # ✅ CHANGED: Severe Storms instead of Floods
+            st.metric("⛈️ Severe Storms", len(disasters_display[disasters_display['category'] == 'Severe Storms']))
         with col4:
-            st.metric("⛰️ Earthquakes", len(disasters[disasters['category'] == 'Earthquakes']))
+            st.metric("⛰️ Earthquakes", len(disasters_display[disasters_display['category'] == 'Earthquakes']))
+        
+        # ✅ NEW: Add "Other" category metric
         col5, col6, col7, col8 = st.columns(4)
         with col5:
             main_categories = ['Wildfires', 'Severe Storms', 'Earthquakes']
             other_count = len(disasters_display[~disasters_display['category'].isin(main_categories)])
             st.metric("🌪️ Other Disasters", other_count)
+        
         st.markdown("---")
         
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("### 📊 By Category")
-            st.bar_chart(disasters['category'].value_counts())
+            st.bar_chart(disasters_display['category'].value_counts())
         
         with col_b:
             st.markdown("### 📅 Recent")
             cols = ['title', 'category', 'date']
-            if 'distance_km' in disasters.columns:
+            if 'distance_km' in disasters_display.columns:
                 cols.append('distance_km')
-            st.dataframe(disasters.head(10)[cols], use_container_width=True, hide_index=True)
+            
+            # ✅ CHANGED: Show ALL data instead of head(10)
+            st.dataframe(
+                disasters_display[cols], 
+                use_container_width=True, 
+                hide_index=True,
+                height=400
+            )
+                        st.caption(f"📊 Showing all {len(disasters_display)} disasters")
+        
+        st.markdown("---")
+        
+        # ✅ NEW: Add Interactive Map in Analytics
+        st.markdown("### 🗺️ Disaster Distribution Map")
+        
+        if "My Location" in view_mode and loc:
+            map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 6
+        else:
+            map_center_lat, map_center_lon, map_zoom = 20, 0, 2
+        
+        analytics_map = folium.Map(
+            location=[map_center_lat, map_center_lon], 
+            zoom_start=map_zoom, 
+            tiles='CartoDB positron'
+        )
+        
+        if not disasters_display.empty:
+            marker_cluster = MarkerCluster().add_to(analytics_map)
+            color_map = {
+                'Wildfires': 'red', 
+                'Severe Storms': 'orange', 
+                'Floods': 'blue', 
+                'Earthquakes': 'darkred', 
+                'Volcanoes': 'red', 
+                'Sea and Lake Ice': 'lightblue',
+                'Snow': 'white', 
+                'Dust and Haze': 'brown', 
+                'Manmade': 'gray'
+            }
+            
+            for _, disaster in disasters_display.iterrows():
+                color = color_map.get(disaster['category'], 'gray')
+                distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
+                
+                folium.Marker(
+                    location=[disaster['lat'], disaster['lon']],
+                    popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
+                    icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
+                    tooltip=disaster['title']
+                ).add_to(marker_cluster)
+        
+        # Add user location marker if in "My Location" mode
+        if "My Location" in view_mode and loc:
+            folium.Marker(
+                location=[loc['lat'], loc['lon']],
+                popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
+                icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
+                tooltip="Your Location"
+            ).add_to(analytics_map)
+            
+            # Add radius circle if in location mode
+            if 'radius' in locals():
+                folium.Circle(
+                    location=[loc['lat'], loc['lon']],
+                    radius=radius * 1000,
+                    color='green',
+                    fill=True,
+                    fillOpacity=0.1,
+                    popup=f"Search Radius: {radius} km"
+                ).add_to(analytics_map)
+        
+        folium.LayerControl().add_to(analytics_map)
+        st_folium(analytics_map, width=1200, height=500)
+        
+        st.markdown("---")
         
         st.download_button(
             "📥 Download CSV",
-            disasters.to_csv(index=False).encode('utf-8'),
+            disasters_display.to_csv(index=False).encode('utf-8'),
             f"disasters_{datetime.now().strftime('%Y%m%d')}.csv",
             "text/csv"
         )
+    else:
+        st.warning("⚠️ No disasters found for the selected criteria")
 
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: gray;'>
 🌍 <b>AI-RescueMap</b> • <b>created by HasnainAtif</b> @ NASA Space Apps 2025
 </p>
-""", unsafe_allow_html=True)      
+""", unsafe_allow_html=True)
