@@ -1274,9 +1274,9 @@ elif menu == "📊 Analytics":
                 hide_index=True,
                 height=400
             )
-                        st.caption(f"📊 Showing all {len(disasters_display)} disasters")
+              st.caption(f"📊 Showing all {len(disasters_display)} disasters")
         
-        st.markdown("---")
+                 st.markdown("---")
         
         # ✅ NEW: Add Interactive Map in Analytics
         st.markdown("### 🗺️ Disaster Distribution Map")
@@ -1356,4 +1356,4 @@ st.markdown("""
 <p style='text-align: center; color: gray;'>
 🌍 <b>AI-RescueMap</b> • <b>created by HasnainAtif</b> @ NASA Space Apps 2025
 </p>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True)        
