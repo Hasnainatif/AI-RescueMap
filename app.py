@@ -11,7 +11,7 @@ import time
 from streamlit_geolocation import streamlit_geolocation 
 
 # Import WorldPop integration
-# NOTE: This file (worldpop_integration.py) must exist in your repository's root
+
 from worldpop_integration import read_worldpop_window
 
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
@@ -913,7 +913,7 @@ with st.sidebar:
     # 2. Location processing logic - ONLY USE GPS DATA IF MANUAL OVERRIDE IS OFF
     if location_data and location_data.get('latitude') is not None:
         
-        # --- CRITICAL FIX 1: Check if the user has manually overridden the location ---
+       
         if st.session_state.location_source != 'manual':
             
             gps_lat = location_data['latitude']
@@ -960,7 +960,7 @@ with st.sidebar:
                         if geocoded:
                             st.session_state.manual_location = geocoded
                             st.session_state.browser_location = None
-                            st.session_state.location_source = 'manual' # --- CRITICAL FIX 2: Set source to manual ---
+                            st.session_state.location_source = 'manual' 
                             st.success(f"✅ Found!")
                             time.sleep(1)
                             st.rerun()
@@ -1055,7 +1055,7 @@ if menu == "🗺 Disaster Map":
         if satellite_layers:
             m = add_nasa_satellite_layers(m, satellite_layers)
         
-        # ✅ FIXED INDENTATION - USE REAL WORLDPOP DATA
+       
         if show_population:
             with st.spinner("📊 Loading WorldPop data..."):
                 pop_df = read_worldpop_window(
@@ -1173,7 +1173,7 @@ elif menu == "🖼 Image Analysis":
     
     if uploaded_file:
         image = Image.open(uploaded_file)
-        st.image(image, use_column_width=True)
+        st.image(image, use_container_width=True)
         
         if st.button("🔍 ANALYZE", type="primary", use_container_width=True):
             if not st.session_state.gemini_model_image:
@@ -1221,7 +1221,7 @@ elif menu == "📊 Analytics":
     is_filtered_view = False
     
     if "My Location" in view_mode and loc:
-        # User only sees this slider if 'My Location' is selected
+       
         radius = st.slider("Radius (km)", 100, 5000, 1000, step=100)
         
         if not disasters.empty:
@@ -1233,7 +1233,7 @@ elif menu == "📊 Analytics":
             st.info("No disasters found globally. Cannot apply location filter.")
             
     elif "Global View" in view_mode:
-        # For Global View, we use the unfiltered 'disasters' (copy of disasters_all)
+      
         st.info(f"🌍 Showing {len(disasters)} global disasters")
         is_filtered_view = False
     else:
@@ -1241,7 +1241,7 @@ elif menu == "📊 Analytics":
         st.info("No location detected. Showing global disasters.")
         is_filtered_view = False
     
-    # --- Map Section - ALWAYS RENDER THE MAP FRAME ---
+   
     
     # Determine map center
     map_center_lat, map_center_lon, map_zoom = 20, 0, 2 # Default Global View
