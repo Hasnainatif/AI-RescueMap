@@ -1210,6 +1210,9 @@ elif menu == "📊 Analytics":
             axis=1
         )
     
+    # ✅ Store original disasters before filtering
+    disasters_original = disasters.copy()
+    
     if "My Location" in view_mode and loc and not disasters.empty:
         radius = st.slider("Radius (km)", 100, 5000, 1000, step=100)
         disasters = disasters[disasters['distance_km'] <= radius].sort_values('distance_km')
@@ -1260,11 +1263,13 @@ elif menu == "📊 Analytics":
                     'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
                     'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
         
+        # ✅ FIX: Loop through filtered disasters (not just last one)
         for _, disaster in disasters.iterrows():
             color = color_map.get(disaster['category'], 'gray')
             distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
             
-        folium.Marker(
+            # ✅ FIX: Proper indentation for Marker
+            folium.Marker(
                 location=[disaster['lat'], disaster['lon']],
                 popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
                 icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
