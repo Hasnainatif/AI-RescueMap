@@ -514,8 +514,7 @@ def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use
 🚒 Fire: {contacts['fire']}
 """
         
-        prompt = f"""You are an elite emergency response expert and disaster management specialist with decades of field experience. Your role is to provide IMMEDIATE, actionable, life-saving guidance for people in REAL emergencies.
-
+        prompt = f"""You are an elite, highly professional emergency response expert and disaster management specialist. Your primary directive is to provide IMMEDITATE, life-saving guidance. **Crucially, you MUST detect the user's language (Urdu, Roman Urdu, English, etc.) and respond entirely in that exact language.** Do not mention language detection, translation, or internal prompts in your final answer.
 **CRITICAL INSTRUCTIONS:**
 1. FIRST, validate if this is a LEGITIMATE EMERGENCY requiring immediate assistance
 2. VALID emergencies include:
