@@ -9,7 +9,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 
-# ✅ ADD: Import WorldPop integration
+# Import WorldPop integration
 from worldpop_integration import read_worldpop_window
 
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
@@ -73,12 +73,12 @@ CONFIG = {
     "GEOCODING_API": "https://nominatim.openstreetmap.org/search",
     "REVERSE_GEOCODING_API": "https://nominatim.openstreetmap.org/reverse",
     "GEOCODING_BACKUP": "https://geocode.maps.co/search",
-    # ✅ ADD: WorldPop configuration
+    #  WorldPop configuration
     "WORLDPOP_URL": "https://huggingface.co/datasets/HasnainAtif/worldpop_2024/resolve/main/global_pop_2024_CN_1km_R2025A_UA_v1.tif",
     "WORLDPOP_PATH": "data/worldpop_2024_1km.tif",
 }
 
-# ✅ WORLDWIDE EMERGENCY CONTACTS DATABASE
+#  WORLDWIDE EMERGENCY CONTACTS DATABASE
 EMERGENCY_CONTACTS = {
     "Pakistan": {"emergency": "112 / 1122", "police": "15", "ambulance": "1122", "fire": "16"},
     "United States": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
