@@ -1218,70 +1218,15 @@ elif menu == "📊 Analytics":
         st.info(f"🌍 Showing {len(disasters)} global disasters")
     
     if not disasters.empty:
-        # ✅ Define main disaster categories
-        main_categories = ['Wildfires', 'Earthquakes', 'Severe Storms']
-        
-        # ✅ Calculate "Other" disasters (not in main categories)
-        other_count = len(disasters[~disasters['category'].isin(main_categories)])
-        
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("🌍 Total", len(disasters))
         with col2:
             st.metric("🔥 Wildfires", len(disasters[disasters['category'] == 'Wildfires']))
         with col3:
-            st.metric("⛰️ Earthquakes", len(disasters[disasters['category'] == 'Earthquakes']))
+            st.metric("🌊 Floods", len(disasters[disasters['category'] == 'Floods']))
         with col4:
-            st.metric("⚡ Severe Storms", len(disasters[disasters['category'] == 'Severe Storms']))
-        
-        # ✅ Add "Other" category metric in second row
-        st.markdown("---")
-        col_other1, col_other2, col_other3 = st.columns([1, 1, 1])
-        with col_other2:
-            st.metric("🌀 Other Disasters", other_count)
-        
-        st.markdown("---")
-        
-        # ✅ Add Map Section in Analytics
-        st.markdown("### 🗺️ Disaster Map")
-        
-        # Determine map center
-        if "My Location" in view_mode and loc:
-            map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 6
-        else:
-            map_center_lat, map_center_lon, map_zoom = 20, 0, 2
-        
-        # Create map
-        analytics_map = folium.Map(location=[map_center_lat, map_center_lon], zoom_start=map_zoom, tiles='CartoDB positron')
-        
-        # Add disaster markers
-        marker_cluster = MarkerCluster().add_to(analytics_map)
-        color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 
-                    'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
-                    'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
-        
-        for _, disaster in disasters.iterrows():
-            color = color_map.get(disaster['category'], 'gray')
-            distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
-            
-        folium.Marker(
-                location=[disaster['lat'], disaster['lon']],
-                popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
-                icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
-                tooltip=disaster['title']
-            ).add_to(marker_cluster)
-        
-        # Add user location marker if available
-        if loc:
-            folium.Marker(
-                location=[loc['lat'], loc['lon']],
-                popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
-                icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
-                tooltip="Your Location"
-            ).add_to(analytics_map)
-        
-        folium.LayerControl().add_to(analytics_map)
-        st_folium(analytics_map, width=1200, height=500)
+            st.metric("⛰️ Earthquakes", len(disasters[disasters['category'] == 'Earthquakes']))
         
         st.markdown("---")
         
@@ -1291,19 +1236,11 @@ elif menu == "📊 Analytics":
             st.bar_chart(disasters['category'].value_counts())
         
         with col_b:
-            st.markdown("### 📅 Recent Disasters (All)")
-            # ✅ Show ALL disasters, not just first 10
+            st.markdown("### 📅 Recent")
             cols = ['title', 'category', 'date']
             if 'distance_km' in disasters.columns:
                 cols.append('distance_km')
-            
-            # Display all disasters with scrolling
-            st.dataframe(
-                disasters[cols], 
-                use_container_width=True, 
-                hide_index=True,
-                height=400  # Fixed height with scroll
-            )
+            st.dataframe(disasters.head(10)[cols], use_container_width=True, hide_index=True)
         
         st.download_button(
             "📥 Download CSV",
@@ -1317,4 +1254,4 @@ st.markdown("""
 <p style='text-align: center; color: gray;'>
 🌍 <b>AI-RescueMap</b> • <b>created by HasnainAtif</b> @ NASA Space Apps 2025
 </p>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True)      
