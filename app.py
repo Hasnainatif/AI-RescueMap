@@ -1264,7 +1264,7 @@ elif menu == "📊 Analytics":
             color = color_map.get(disaster['category'], 'gray')
             distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
             
-                        folium.Marker(
+        folium.Marker(
                 location=[disaster['lat'], disaster['lon']],
                 popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
                 icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
