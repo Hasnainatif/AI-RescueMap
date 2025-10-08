@@ -8,8 +8,10 @@ from folium.plugins import HeatMap, MarkerCluster
 import numpy as np
 from datetime import datetime, timedelta
 import time
+from streamlit_geolocation import streamlit_geolocation 
 
 # Import WorldPop integration
+# NOTE: This file (worldpop_integration.py) must exist in your repository's root
 from worldpop_integration import read_worldpop_window
 
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
@@ -29,6 +31,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* ------------------- Global Styles & Fonts ------------------- */
     .main-header {
         font-size: 2.5rem;
         font-weight: bold;
@@ -45,6 +48,18 @@ st.markdown("""
         font-size: 1.1rem;
         margin-bottom: 2rem;
     }
+    
+    /* ------------------- Component Styling (Borders/Lines Fix) ------------------- */
+    .stSelectbox, .stMultiSelect, .stSlider {
+        border-radius: 0.5rem;
+    }
+    
+    .stRadio > div, 
+    [data-testid="stVerticalBlock"] > div > div:nth-child(2) {
+        border-bottom: none !important;
+    }
+    
+    /* ------------------- Custom Button Styling ------------------- */
     .disaster-alert {
         background: linear-gradient(135deg, #ff4b4b 0%, #ff6b6b 100%);
         color: white;
@@ -62,6 +77,30 @@ st.markdown("""
         margin: 1rem 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
+    
+    /* Style the actual geolocation button provided by streamlit_geolocation */
+    [data-testid^="stComponent"] button {
+        width: 100%;
+        padding: 0.75rem 1rem !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 5px !important;
+        font-weight: bold;
+        font-size: 1rem !important;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+    }
+
+    /* Inject the custom text "📍 Get Location" into the bare button using CSS content property */
+    [data-testid^="stComponent"] button > div > span:nth-child(1)::before {
+        content: "📍 Get Location"; 
+    }
+    
+    /* Hide the original default text (usually empty or 'Click') from the component */
+    [data-testid^="stComponent"] button > div > span:not(:nth-child(1)) {
+        display: none;
+    }
+    
 </style>
 """, unsafe_allow_html=True)
 
@@ -107,6 +146,7 @@ def get_emergency_contacts(country: str) -> dict:
     """Get emergency contacts for a specific country"""
     return EMERGENCY_CONTACTS.get(country, EMERGENCY_CONTACTS["Default"])
 
+@st.cache_data(ttl=60*60*24) # Cache geocoding for 24 hours
 def geocode_location(city_or_address: str, max_retries=2):
     """Convert city/address to coordinates with multiple fallback services."""
     for attempt in range(max_retries):
@@ -258,6 +298,7 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
         'source': 'GPS (No address found)'
     }
 
+@st.cache_data(ttl=60*60*2) # Cache IP lookup for 2 hours to prevent repeated API calls
 def get_ip_location():
     """Get location from IP address (fallback only)."""
     try:
@@ -307,16 +348,18 @@ def get_ip_location():
     }
 
 def get_current_location():
-    """Priority: Browser GPS > Manual > IP Fallback"""
-    if st.session_state.get('browser_location'):
-        return st.session_state.browser_location
-    elif st.session_state.get('manual_location'):
+    """Priority: Manual Override > Browser GPS > IP Fallback"""
+    if st.session_state.get('location_source') == 'manual' and st.session_state.get('manual_location'):
         return st.session_state.manual_location
+    elif st.session_state.get('location_source') == 'gps' and st.session_state.get('browser_location'):
+        return st.session_state.browser_location
     elif st.session_state.get('ip_location'):
         return st.session_state.ip_location
     else:
-        return get_ip_location()
+        # Fallback will attempt IP lookup if all session states are somehow empty
+        return get_ip_location() 
 
+@st.cache_resource # Cache the model initialization
 def setup_gemini(api_key: str = None, model_type: str = "text"):
     if not GEMINI_AVAILABLE:
         return None
@@ -447,7 +490,7 @@ def calculate_disaster_impact(disaster_df, population_df, radius_km=50):
             'affected_population': int(affected['population'].sum()),
             'affected_area_km2': int(np.pi * radius_km**2),
             'risk_level': 'CRITICAL' if affected['population'].sum() > 100000 else 
-                         'HIGH' if affected['population'].sum() > 10000 else 'MODERATE'
+                          'HIGH' if affected['population'].sum() > 10000 else 'MODERATE'
         })
     return impacts
 
@@ -476,22 +519,22 @@ def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use
 **CRITICAL INSTRUCTIONS:**
 1. FIRST, validate if this is a LEGITIMATE EMERGENCY requiring immediate assistance
 2. VALID emergencies include:
-   - Natural disasters (floods, earthquakes, hurricanes, tornadoes, tsunamis, wildfires, landslides, avalanches, volcanic eruptions)
-   - Dangerous animal encounters (snakes, wild animals, aggressive animals, insect swarms)
-   - Building emergencies (structural collapse, gas leaks, fires, explosions, trapped in building)
-   - Medical emergencies during disasters (injuries, bleeding, shock, breathing problems, unconsciousness)
-   - Being lost/stranded (wilderness, desert, mountains, sea, dangerous areas, no supplies)
-   - Severe weather threats (lightning, hail, extreme temperatures, blizzards)
-   - Environmental hazards (toxic spills, radiation, smoke, contaminated water)
-   - Mass emergency situations (riots, civil unrest during disasters, mass evacuations)
+    - Natural disasters (floods, earthquakes, hurricanes, tornadoes, tsunamis, wildfires, landslides, avalanches, volcanic eruptions)
+    - Dangerous animal encounters (snakes, wild animals, aggressive animals, insect swarms)
+    - Building emergencies (structural collapse, gas leaks, fires, explosions, trapped in building)
+    - Medical emergencies during disasters (injuries, bleeding, shock, breathing problems, unconsciousness)
+    - Being lost/stranded (wilderness, desert, mountains, sea, dangerous areas, no supplies)
+    - Severe weather threats (lightning, hail, extreme temperatures, blizzards)
+    - Environmental hazards (toxic spills, radiation, smoke, contaminated water)
+    - Mass emergency situations (riots, civil unrest during disasters, mass evacuations)
 
 3. INVALID queries that should be REJECTED:
-   - Coding questions, programming help, software development
-   - Homework, assignments, academic questions unrelated to emergency survival
-   - Jokes, memes, entertainment, general chat
-   - General knowledge questions (history, science, math) not related to immediate survival
-   - Non-emergency topics (travel planning, recipes, shopping, sports, etc.)
-   - Hypothetical scenarios without real danger ("what if I was in...")
+    - Coding questions, programming help, software development
+    - Homework, assignments, academic questions unrelated to emergency survival
+    - Jokes, memes, entertainment, general chat
+    - General knowledge questions (history, science, math) not related to immediate survival
+    - Non-emergency topics (travel planning, recipes, shopping, sports, etc.)
+    - Hypothetical scenarios without real danger ("what if I was in...")
 
 **IF QUERY IS INVALID:**
 Respond EXACTLY with this format:
@@ -651,7 +694,7 @@ Please upload a clear photo showing:
 **If you are in an emergency:**
 Call local emergency services immediately instead of uploading images."
 
-**IF IMAGE IS VALID (REAL DISASTER/EMERGENCY):**
+**IF IMAGE IS VALID (REAL EMERGENCY):**
 
 Provide comprehensive expert analysis in this EXACT format:
 
@@ -808,8 +851,13 @@ if 'browser_location' not in st.session_state:
 if 'manual_location' not in st.session_state:
     st.session_state.manual_location = None
 
+# Added new state to explicitly track the source (gps, manual, ip)
+if 'location_source' not in st.session_state:
+    st.session_state.location_source = 'ip' 
+
+# Initialize IP location only once at the start (cached)
 if 'ip_location' not in st.session_state:
-    st.session_state.ip_location = get_ip_location()
+    st.session_state.ip_location = get_ip_location() 
 
 if 'gemini_model_text' not in st.session_state:
     st.session_state.gemini_model_text = None
@@ -828,6 +876,11 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🎯 Your Location")
     
+    # Refresh IP location on every rerun if no accurate method is chosen
+    if st.session_state.location_source == 'ip':
+        # Re-fetch IP location to ensure current IP/VPN is reflected
+        st.session_state.ip_location = get_ip_location() 
+
     loc = get_current_location()
     
     if loc:
@@ -854,98 +907,40 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🌐 Get My Location (GPS)")
     
-    location_html = """
-    <script>
-    function getLocation() {
-        const button = document.getElementById('gps-btn');
-        const status = document.getElementById('gps-status');
+    # 1. Component Call 
+    location_data = streamlit_geolocation() 
+
+    # 2. Location processing logic - ONLY USE GPS DATA IF MANUAL OVERRIDE IS OFF
+    if location_data and location_data.get('latitude') is not None:
         
-        if (!navigator.geolocation) {
-            status.innerHTML = '❌ Geolocation not supported';
-            return;
-        }
-        
-        button.disabled = true;
-        button.innerHTML = '📡 Getting location...';
-        status.innerHTML = '⏳ Requesting permission...';
-        
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const lat = position.coords.latitude;
-                const lon = position.coords.longitude;
-                const acc = position.coords.accuracy;
-                
-                const url = new URL(window.location.href);
-                url.searchParams.set('gps_lat', lat);
-                url.searchParams.set('gps_lon', lon);
-                url.searchParams.set('gps_acc', acc);
-                url.searchParams.set('gps_timestamp', Date.now());
-                window.location.href = url.toString();
-            },
-            (error) => {
-                button.disabled = false;
-                button.innerHTML = '📍 Get My Location';
-                
-                let msg = '❌ ';
-                switch(error.code) {
-                    case error.PERMISSION_DENIED:
-                        msg += 'Permission denied. Please allow location access.';
-                        break;
-                    case error.POSITION_UNAVAILABLE:
-                        msg += 'Location unavailable. Check device settings.';
-                        break;
-                    case error.TIMEOUT:
-                        msg += 'Request timeout. Try again.';
-                        break;
-                    default:
-                        msg += 'Unknown error: ' + error.message;
-                }
-                status.innerHTML = msg;
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            }
-        );
-    }
-    </script>
-    
-    <button id="gps-btn" onclick="getLocation()" style="
-        width: 100%;
-        padding: 0.5rem 1rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 5px;
-        font-weight: bold;
-        cursor: pointer;
-        font-size: 1rem;
-    ">📍 Get My Location</button>
-    <p id="gps-status" style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;"></p>
-    """
-    
-    st.components.v1.html(location_html, height=120)
-    
-    query_params = st.query_params
-    if 'gps_lat' in query_params and 'gps_lon' in query_params:
-        try:
-            gps_lat = float(query_params['gps_lat'])
-            gps_lon = float(query_params['gps_lon'])
-            gps_acc = float(query_params.get('gps_acc', 0))
+        # --- CRITICAL FIX 1: Check if the user has manually overridden the location ---
+        if st.session_state.location_source != 'manual':
             
-            with st.spinner("🌍 Finding your location..."):
-                browser_loc = reverse_geocode(gps_lat, gps_lon)
-                if browser_loc:
-                    st.session_state.browser_location = browser_loc
-                    st.success(f"✅ GPS: {browser_loc['city']}, {browser_loc['country']}")
-                    st.caption(f"📍 Accuracy: ~{int(gps_acc)}m")
-                    st.query_params.clear()
-                    time.sleep(1)
-                    st.rerun()
-        except Exception as e:
-            st.error(f"❌ GPS error: {e}")
-            st.query_params.clear()
+            gps_lat = location_data['latitude']
+            gps_lon = location_data['longitude']
+            
+            is_new_location = (st.session_state.get('location_source') != 'gps' or 
+                               st.session_state.browser_location.get('lat') != gps_lat)
+            
+            if is_new_location:
+                try:
+                    with st.spinner("🌍 Finding your location..."):
+                        browser_loc = reverse_geocode(gps_lat, gps_lon)
+                        if browser_loc:
+                            st.session_state.browser_location = browser_loc
+                            st.session_state.manual_location = None
+                            st.session_state.location_source = 'gps' # Set source to GPS
+                            st.success(f"✅ GPS: {browser_loc['city']}, {browser_loc['country']}")
+                            st.rerun() 
+                except Exception as e:
+                    st.error(f"❌ GPS error during geocoding: {e}")
+            else:
+                st.caption("✅ GPS location active.")
+        else:
+            st.caption("📍 GPS ignored. Manual location override is active.") # Inform the user
+            
+    else:
+        st.caption("Click the button above and select 'Allow' when prompted by your browser to use GPS.")
     
     st.markdown("---")
     st.markdown("### 📝 Enter Location Manually")
@@ -958,24 +953,28 @@ with st.sidebar:
         col_btn1, col_btn2 = st.columns(2)
         
         with col_btn1:
-            if st.button("🔍 Find", use_container_width=True, disabled=not location_input):
+            if st.button("🔍 Find", use_container_width=True, disabled=not location_input, key="manual_find_btn"):
                 if location_input:
                     with st.spinner(f"🌍 Finding {location_input}..."):
                         geocoded = geocode_location(location_input)
                         if geocoded:
                             st.session_state.manual_location = geocoded
                             st.session_state.browser_location = None
+                            st.session_state.location_source = 'manual' # --- CRITICAL FIX 2: Set source to manual ---
                             st.success(f"✅ Found!")
                             time.sleep(1)
                             st.rerun()
         
         with col_btn2:
-            if st.session_state.manual_location and st.button("🔄 Reset", use_container_width=True):
+            # Clear Manual button (this is now the only way to clear accurate location)
+            if st.session_state.manual_location and st.button("Clear Manual", use_container_width=True, key="manual_reset_btn"):
                 st.session_state.manual_location = None
                 st.session_state.browser_location = None
-                st.success("✅ Reset")
+                st.session_state.location_source = 'ip' # Reset source to IP
+                st.success("✅ Manual Cleared (Fallback to IP)")
                 time.sleep(0.5)
                 st.rerun()
+
 
 st.markdown('<h1 class="main-header">AI-RescueMap 🌍</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Real-time global disaster monitoring with NASA data & AI</p>', unsafe_allow_html=True)
@@ -988,6 +987,9 @@ if gemini_api_key:
         st.session_state.gemini_model_image = setup_gemini(gemini_api_key, "image")
 
 if menu == "🗺 Disaster Map":
+    # --- Initialization is necessary for map rendering logic ---
+    center_lat, center_lon, zoom = 20, 0, 2
+    
     with st.spinner("🛰 Fetching NASA EONET data..."):
         disasters = fetch_nasa_eonet_disasters()
     
@@ -1043,8 +1045,8 @@ if menu == "🗺 Disaster Map":
         show_population = st.checkbox("Show Population", value=True)
         
         satellite_layers = st.multiselect("Satellite Layers", 
-                                         ['True Color', 'Active Fires', 'Night Lights'], 
-                                         default=['True Color'])
+                                             ['True Color', 'Active Fires', 'Night Lights'], 
+                                             default=['True Color'])
         impact_radius = st.slider("Impact Radius (km)", 10, 200, 50)
     
     with col_map:
@@ -1071,30 +1073,30 @@ if menu == "🗺 Disaster Map":
                 pop_df = generate_population_data(center_lat, center_lon, radius_deg=3, num_points=1500)
             else:
                 st.success(f"✅WorldPop data: {len(pop_df):,} population points")
-                      # Create heatmap if data exists
+                        # Create heatmap if data exists
             if pop_df is not None and len(pop_df) > 0:
                 heat_data = [[row['lat'], row['lon'], row['population']] for _, row in pop_df.iterrows()]
                 HeatMap(heat_data, radius=15, blur=25, max_zoom=13, 
-                       gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}).add_to(m)
+                        gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}).add_to(m)
         
         if show_disasters and not disasters.empty:
             marker_cluster = MarkerCluster().add_to(m)
             color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 
-                        'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
-                        'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
+                         'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
+                         'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
             
             for _, disaster in disasters.iterrows():
                 color = color_map.get(disaster['category'], 'gray')
                 distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
                 
                 folium.Circle(location=[disaster['lat'], disaster['lon']], 
-                            radius=impact_radius * 1000,
-                            color=color, fill=True, fillOpacity=0.1).add_to(m)
+                              radius=impact_radius * 1000,
+                              color=color, fill=True, fillOpacity=0.1).add_to(m)
                 
                 folium.Marker(location=[disaster['lat'], disaster['lon']],
-                            popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
-                            icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
-                            tooltip=disaster['title']).add_to(marker_cluster)
+                              popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
+                              icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
+                              tooltip=disaster['title']).add_to(marker_cluster)
         
         if loc:
             folium.Marker(
@@ -1202,29 +1204,97 @@ elif menu == "📊 Analytics":
         view_mode = "🌍 Global View"
     
     with st.spinner("📡 Loading data..."):
-        disasters = fetch_nasa_eonet_disasters(limit=500)
+        # Load the full, unfiltered data once (cached function)
+        disasters_all = fetch_nasa_eonet_disasters(limit=500)
     
+    # Initialize disasters with the full dataset
+    disasters = disasters_all.copy()
+
     if not disasters.empty and loc:
+        # Calculate distance if location is available
         disasters['distance_km'] = disasters.apply(
             lambda row: calculate_distance(loc['lat'], loc['lon'], row['lat'], row['lon']), 
             axis=1
         )
     
-    # ✅ Store original disasters before filtering
-    disasters_original = disasters.copy()
+    # --- CORE LOGIC FOR FILTERING (My Location) ---
+    is_filtered_view = False
     
-    if "My Location" in view_mode and loc and not disasters.empty:
+    if "My Location" in view_mode and loc:
+        # User only sees this slider if 'My Location' is selected
         radius = st.slider("Radius (km)", 100, 5000, 1000, step=100)
-        disasters = disasters[disasters['distance_km'] <= radius].sort_values('distance_km')
-        st.success(f"📍 {len(disasters)} disasters within {radius} km")
-    else:
-        st.info(f"🌍 Showing {len(disasters)} global disasters")
-    
-    if not disasters.empty:
-        # ✅ Define main disaster categories
-        main_categories = ['Wildfires', 'Earthquakes', 'Severe Storms']
         
-        # ✅ Calculate "Other" disasters (not in main categories)
+        if not disasters.empty:
+            # Filter the dataset to the user's radius
+            disasters = disasters[disasters['distance_km'] <= radius].sort_values('distance_km')
+            st.success(f"📍 Showing {len(disasters)} disasters within {radius} km")
+            is_filtered_view = True
+        else:
+            st.info("No disasters found globally. Cannot apply location filter.")
+            
+    elif "Global View" in view_mode:
+        # For Global View, we use the unfiltered 'disasters' (copy of disasters_all)
+        st.info(f"🌍 Showing {len(disasters)} global disasters")
+        is_filtered_view = False
+    else:
+        # Fallback case (e.g., loc is None)
+        st.info("No location detected. Showing global disasters.")
+        is_filtered_view = False
+    
+    # --- Map Section - ALWAYS RENDER THE MAP FRAME ---
+    
+    # Determine map center
+    map_center_lat, map_center_lon, map_zoom = 20, 0, 2 # Default Global View
+    
+    if loc and is_filtered_view:
+        # Center map on user location if filtered view is active
+        map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 6
+    elif loc and "Global View" in view_mode:
+        # Center map globally but respect if loc is available
+        map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 3
+        
+    st.markdown("### 🗺️ Disaster Map")
+    
+    analytics_map = folium.Map(location=[map_center_lat, map_center_lon], zoom_start=map_zoom, tiles='CartoDB positron')
+    
+    # Render map features only if there is data
+    if not disasters.empty:
+        # Add disaster markers 
+        marker_cluster = MarkerCluster().add_to(analytics_map)
+        color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 
+                     'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
+                     'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
+        
+        for _, disaster in disasters.iterrows():
+            color = color_map.get(disaster['category'], 'gray')
+            # Check for 'distance_km' before trying to format it
+            distance_text = f"<br>📍 {disaster.get('distance_km', 0):.0f} km from you" if 'distance_km' in disaster else ""
+            
+            folium.Marker(
+                location=[disaster['lat'], disaster['lon']],
+                popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
+                icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
+                tooltip="Disaster"
+            ).add_to(marker_cluster)
+        
+    # Add user location marker if available and view is set to My Location
+    if loc and "My Location" in view_mode:
+        folium.Marker(
+            location=[loc['lat'], loc['lon']],
+            popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
+            icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
+            tooltip="Your Location"
+        ).add_to(analytics_map)
+    
+    folium.LayerControl().add_to(analytics_map)
+    st_folium(analytics_map, width=1200, height=500)
+    
+    st.markdown("---")
+
+    # Metrics and Charts - Only render if there is data to analyze
+    if not disasters.empty:
+        # Metrics block
+        main_categories = ['Wildfires', 'Earthquakes', 'Severe Storms']
         other_count = len(disasters[~disasters['category'].isin(main_categories)])
         
         col1, col2, col3, col4 = st.columns(4)
@@ -1237,59 +1307,14 @@ elif menu == "📊 Analytics":
         with col4:
             st.metric("⚡ Severe Storms", len(disasters[disasters['category'] == 'Severe Storms']))
         
-        # ✅ Add "Other" category metric in second row
         st.markdown("---")
         col_other1, col_other2, col_other3 = st.columns([1, 1, 1])
         with col_other2:
             st.metric("🌀 Other Disasters", other_count)
         
         st.markdown("---")
-        
-        # ✅ Add Map Section in Analytics
-        st.markdown("### 🗺️ Disaster Map")
-        
-        # Determine map center
-        if "My Location" in view_mode and loc:
-            map_center_lat, map_center_lon, map_zoom = loc['lat'], loc['lon'], 6
-        else:
-            map_center_lat, map_center_lon, map_zoom = 20, 0, 2
-        
-        # Create map
-        analytics_map = folium.Map(location=[map_center_lat, map_center_lon], zoom_start=map_zoom, tiles='CartoDB positron')
-        
-        # Add disaster markers
-        marker_cluster = MarkerCluster().add_to(analytics_map)
-        color_map = {'Wildfires': 'red', 'Severe Storms': 'orange', 'Floods': 'blue', 
-                    'Earthquakes': 'darkred', 'Volcanoes': 'red', 'Sea and Lake Ice': 'lightblue',
-                    'Snow': 'white', 'Dust and Haze': 'brown', 'Manmade': 'gray'}
-        
-        # ✅ FIX: Loop through filtered disasters (not just last one)
-        for _, disaster in disasters.iterrows():
-            color = color_map.get(disaster['category'], 'gray')
-            distance_text = f"<br>📍 {disaster['distance_km']:.0f} km from you" if 'distance_km' in disaster else ""
-            
-            # ✅ FIX: Proper indentation for Marker
-            folium.Marker(
-                location=[disaster['lat'], disaster['lon']],
-                popup=f"<b>{disaster['title']}</b><br>{disaster['category']}<br>{disaster['date']}{distance_text}",
-                icon=folium.Icon(color=color, icon='warning-sign', prefix='glyphicon'),
-                tooltip=disaster['title']
-            ).add_to(marker_cluster)
-        
-        # Add user location marker if available
-        if loc:
-            folium.Marker(
-                location=[loc['lat'], loc['lon']],
-                popup=f"<b>📍 You are here</b><br>{loc['city']}, {loc['country']}",
-                icon=folium.Icon(color='green', icon='home', prefix='glyphicon'),
-                tooltip="Your Location"
-            ).add_to(analytics_map)
-        
-        folium.LayerControl().add_to(analytics_map)
-        st_folium(analytics_map, width=1200, height=500)
-        
-        st.markdown("---")
-        
+
+        # Charts and DataFrames
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("### 📊 By Category")
@@ -1297,17 +1322,17 @@ elif menu == "📊 Analytics":
         
         with col_b:
             st.markdown("### 📅 Recent Disasters (All)")
-            # ✅ Show ALL disasters, not just first 10
             cols = ['title', 'category', 'date']
-            if 'distance_km' in disasters.columns:
+            
+            # Include distance column if it exists and the view is My Location
+            if 'distance_km' in disasters.columns and is_filtered_view:
                 cols.append('distance_km')
             
-            # Display all disasters with scrolling
             st.dataframe(
                 disasters[cols], 
                 use_container_width=True, 
                 hide_index=True,
-                height=400  # Fixed height with scroll
+                height=400 
             )
         
         st.download_button(
@@ -1316,6 +1341,8 @@ elif menu == "📊 Analytics":
             f"disasters_{datetime.now().strftime('%Y%m%d')}.csv",
             "text/csv"
         )
+    else:
+        st.info("No disaster events found for analysis in this area or globally.")
 
 st.markdown("---")
 st.markdown("""
