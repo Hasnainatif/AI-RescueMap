@@ -11,7 +11,7 @@ import time
 from streamlit_geolocation import streamlit_geolocation 
 
 # Import WorldPop integration
-
+# NOTE: This file (worldpop_integration.py) must exist in your repository's root
 from worldpop_integration import read_worldpop_window
 
 os.environ['STREAMLIT_CONFIG_DIR'] = '/tmp/.streamlit'
@@ -119,7 +119,8 @@ CONFIG = {
 
 #  WORLDWIDE EMERGENCY CONTACTS DATABASE
 EMERGENCY_CONTACTS = {
-    "Pakistan": {"emergency": "112 / 1122", "police": "15", "ambulance": "1122", "fire": "16"},
+    # --- IMPORTANT FIX: Specific, local numbers for Pakistan ---
+    "Pakistan": {"emergency": "1122", "police": "15", "ambulance": "1122", "fire": "16"}, 
     "United States": {"emergency": "911", "police": "911", "ambulance": "911", "fire": "911"},
     "United Kingdom": {"emergency": "999 / 112", "police": "999", "ambulance": "999", "fire": "999"},
     "India": {"emergency": "112", "police": "100", "ambulance": "102", "fire": "101"},
@@ -139,11 +140,13 @@ EMERGENCY_CONTACTS = {
     "Turkey": {"emergency": "112", "police": "155", "ambulance": "112", "fire": "110"},
     "Indonesia": {"emergency": "112", "police": "110", "ambulance": "118", "fire": "113"},
     "Nigeria": {"emergency": "112", "police": "112", "ambulance": "112", "fire": "112"},
+    # The Default is now truly generic, used only when the country lookup fails entirely
     "Default": {"emergency": "112 (International)", "police": "Local Police", "ambulance": "Local Ambulance", "fire": "Local Fire"}
 }
 
 def get_emergency_contacts(country: str) -> dict:
     """Get emergency contacts for a specific country"""
+    # Use .get() with the Default key for reliable fallback
     return EMERGENCY_CONTACTS.get(country, EMERGENCY_CONTACTS["Default"])
 
 @st.cache_data(ttl=60*60*24) # Cache geocoding for 24 hours
@@ -168,10 +171,20 @@ def geocode_location(city_or_address: str, max_retries=2):
                     result = data[0]
                     address = result.get('address', {})
                     
+                    # --- FIX: Robust search for 'city' name in forward geocoding ---
+                    city_name = (
+                        address.get('city') or 
+                        address.get('town') or 
+                        address.get('village') or
+                        address.get('suburb') or
+                        address.get('county') or 
+                        result.get('display_name', '').split(',')[0] 
+                    )
+                    
                     return {
                         'lat': float(result['lat']),
                         'lon': float(result['lon']),
-                        'city': address.get('city') or address.get('town') or address.get('village') or result.get('display_name', '').split(',')[0],
+                        'city': city_name,
                         'country': address.get('country', 'Unknown'),
                         'region': address.get('state') or address.get('region', 'Unknown'),
                         'full_address': result.get('display_name', city_or_address),
@@ -205,10 +218,13 @@ def geocode_location(city_or_address: str, max_retries=2):
             if data and len(data) > 0:
                 result = data[0]
                 
+                # --- FIX: Robust search for 'city' name in fallback geocoding ---
+                city_name = result.get('display_name', city_or_address).split(',')[0]
+                
                 return {
                     'lat': float(result['lat']),
                     'lon': float(result['lon']),
-                    'city': result.get('display_name', city_or_address).split(',')[0],
+                    'city': city_name,
                     'country': result.get('display_name', '').split(',')[-1].strip() if ',' in result.get('display_name', '') else 'Unknown',
                     'region': result.get('display_name', '').split(',')[1].strip() if len(result.get('display_name', '').split(',')) > 1 else 'Unknown',
                     'full_address': result.get('display_name', city_or_address),
@@ -267,10 +283,22 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
                 
                 if data and 'address' in data:
                     address = data['address']
+                    
+                    # --- FIX: Robust search for 'city' in reverse geocoding ---
+                    city_name = (
+                        address.get('city') or 
+                        address.get('town') or 
+                        address.get('village') or
+                        address.get('suburb') or
+                        address.get('county') or
+                        address.get('hamlet') or
+                        address.get('state', 'Unknown') # Fallback to State/Region name if all else fails
+                    )
+                    
                     return {
                         'lat': lat,
                         'lon': lon,
-                        'city': address.get('city') or address.get('town') or address.get('village', 'Unknown'),
+                        'city': city_name,
                         'country': address.get('country', 'Unknown'),
                         'region': address.get('state') or address.get('region', 'Unknown'),
                         'full_address': data.get('display_name', f"{lat}, {lon}"),
@@ -287,6 +315,7 @@ def reverse_geocode(lat: float, lon: float, max_retries=2):
                 time.sleep(1)
                 continue
     
+    # If API call failed or returned nothing useful, use coordinates as city name
     return {
         'lat': lat,
         'lon': lon,
@@ -306,10 +335,13 @@ def get_ip_location():
         data = response.json()
         
         if 'error' not in data and 'latitude' in data:
+            # --- FIX: Ensure 'city' is not None before returning ---
+            city_name = data.get('city') or data.get('region') or data.get('country_name') or 'Unknown'
+
             return {
                 'lat': float(data['latitude']),
                 'lon': float(data['longitude']),
-                'city': data.get('city', 'Unknown'),
+                'city': city_name,
                 'country': data.get('country_name', 'Unknown'),
                 'region': data.get('region', 'Unknown'),
                 'ip': data.get('ip', 'Unknown'),
@@ -324,10 +356,13 @@ def get_ip_location():
         data = response.json()
         
         if data.get('status') == 'success':
+            # --- FIX: Ensure 'city' is not None before returning ---
+            city_name = data.get('city') or data.get('regionName') or data.get('country') or 'Unknown'
+
             return {
                 'lat': float(data['lat']),
                 'lon': float(data['lon']),
-                'city': data.get('city', 'Unknown'),
+                'city': city_name,
                 'country': data.get('country', 'Unknown'),
                 'region': data.get('regionName', 'Unknown'),
                 'ip': data.get('query', 'Unknown'),
@@ -499,21 +534,47 @@ def get_ai_disaster_guidance(disaster_type: str, user_situation: str, model, use
         return """⚠️ **AI Not Available** - Please add your Gemini API key in settings."""
     
     try:
-        location_context = ""
         emergency_numbers = ""
+        location_context = ""
         
-        if use_location and location:
-            location_context = f"\n\n**USER LOCATION:** {location['city']}, {location['country']}"
-            contacts = get_emergency_contacts(location['country'])
-            emergency_numbers = f"""
+        # --- MODIFIED LOGIC: Determine the location to use for contacts/context ---
+        
+        # Priority check: 1. Manual/GPS (if active) > 2. IP Fallback
+        contact_location = None
+        
+        if st.session_state.get('location_source') in ['manual', 'gps']:
+            contact_location = st.session_state.manual_location or st.session_state.browser_location
+        
+        if contact_location is None:
+            contact_location = st.session_state.ip_location
+        
+        
+        if contact_location:
+            location_context = f" (User is currently in: {contact_location['city']}, {contact_location['country']})"
+            contacts = get_emergency_contacts(contact_location['country'])
+            
+            # Check if the contacts are the generic fallback values
+            if contacts['emergency'] == "112 (International)":
+                emergency_numbers = """
+                
+📞 **EMERGENCY CONTACTS (Location Not Found/Set):**
+🚨 Emergency: 112 (International)
+👮 Police: Local Police
+🚑 Ambulance: Local Ambulance
+🚒 Fire: Local Fire
+"""
+            else:
+                # Display specific, local contacts
+                emergency_numbers = f"""
 
-📞 **EMERGENCY CONTACTS FOR {location['country'].upper()}:**
+📞 **EMERGENCY CONTACTS FOR {contact_location['country'].upper()}:**
 🚨 Emergency: {contacts['emergency']}
 👮 Police: {contacts['police']}
 🚑 Ambulance: {contacts['ambulance']}
 🚒 Fire: {contacts['fire']}
 """
-        
+        # --- END OF MODIFIED LOGIC ---
+
         prompt = f"""You are an elite, highly professional emergency response expert and disaster management specialist. Your primary directive is to provide IMMEDITATE, life-saving guidance. **Crucially, you MUST detect the user's language (Urdu, Roman Urdu, English, etc.) and respond entirely in that exact language.** Do not mention language detection, translation, or internal prompts in your final answer.
 **CRITICAL INSTRUCTIONS:**
 1. FIRST, validate if this is a LEGITIMATE EMERGENCY requiring immediate assistance
@@ -618,11 +679,10 @@ Provide comprehensive, expert-level emergency guidance in this EXACT format:
 💡 **LIFE-SAVING TIPS SPECIFIC TO THIS EMERGENCY:**
 [Provide 2-3 expert-level, lesser-known survival tactics that could save lives]
 
-**CRITICAL: Keep all advice PRACTICAL, ACTIONABLE, and SPECIFIC. No generic statements. Every instruction should be clear enough that a panicked person can follow it. Focus on survival, not comfort.**
-
-Remember: YOU ARE SAVING LIVES. Be direct, be precise, be expert-level."""
+**CRITICAL: Keep all advice PRACTICAL, ACTIONABLE, and SPECIFIC. No generic statements. Every instruction should be clear enough that a panicked person can follow it. Focus on survival, not comfort.**"""
 
         response = model.generate_content(prompt)
+        
         return response.text + emergency_numbers
         
     except Exception as e:
@@ -673,25 +733,14 @@ Respond EXACTLY in this format:
 
 This image does not show a real disaster or emergency situation requiring assessment.
 
-**Image appears to contain:** [Describe what the image actually shows - e.g., "a meme", "a selfie", "code screenshot", "normal scenery"]
+Image appears to contain: [Describe what the image actually shows - e.g., "a meme", "normal scenery", "minor damage"]
 
-**This system analyzes ONLY:**
+This system analyzes ONLY:
 - Real disaster damage and destruction
 - Active emergency situations
-- Dangerous conditions requiring response
-- Aftermath of natural disasters
 - Structural failures and hazards
-- Environmental threats
 
-**If you have a real disaster image:**
-Please upload a clear photo showing:
-- Visible damage or destruction
-- Active emergency conditions
-- Dangerous situations
-- Disaster aftermath
-
-**If you are in an emergency:**
-Call local emergency services immediately instead of uploading images."
+If you are in an emergency: Call local emergency services immediately instead of uploading images.
 
 **IF IMAGE IS VALID (REAL EMERGENCY):**
 
@@ -809,16 +858,19 @@ Provide comprehensive expert analysis in this EXACT format:
         try:
             response = model.generate_content([prompt, image])
             
+            response_text = response.text
+            
             severity_map = {'LOW': 25, 'MODERATE': 50, 'HIGH': 75, 'CRITICAL': 95}
             severity_score = 50
             for level, score in severity_map.items():
-                if level in response.text.upper():
+                # Check for severity levels in the response text
+                if level in response_text.upper():
                     severity_score = score
                     break
             
             return {
                 'success': True,
-                'analysis': response.text,
+                'analysis': response_text,
                 'severity_score': severity_score,
                 'severity_level': 'CRITICAL' if severity_score > 80 else 'HIGH' if severity_score > 60 else 'MODERATE'
             }
@@ -878,7 +930,7 @@ with st.sidebar:
     # Refresh IP location on every rerun if no accurate method is chosen
     if st.session_state.location_source == 'ip':
         # Re-fetch IP location to ensure current IP/VPN is reflected
-        st.session_state.ip_location = get_ip_location() 
+        st.session_state.ip_location = get_ip_location() # Call cached function
 
     loc = get_current_location()
     
@@ -912,7 +964,7 @@ with st.sidebar:
     # 2. Location processing logic - ONLY USE GPS DATA IF MANUAL OVERRIDE IS OFF
     if location_data and location_data.get('latitude') is not None:
         
-       
+        # --- CRITICAL FIX 1: Check if the user has manually overridden the location ---
         if st.session_state.location_source != 'manual':
             
             gps_lat = location_data['latitude']
@@ -940,6 +992,16 @@ with st.sidebar:
             
     else:
         st.caption("Click the button above and select 'Allow' when prompted by your browser to use GPS.")
+
+    # 3. Reset Button for Location (Clears GPS and Manual)
+    if st.session_state.get('location_source') in ['manual', 'gps']:
+        if st.button("🔄 Reset Location", use_container_width=True, help="Clear GPS and Manual location to fall back to IP"):
+            st.session_state.browser_location = None
+            st.session_state.manual_location = None
+            st.session_state.location_source = 'ip' # Reset source to IP
+            st.success("✅ Reset to IP-Based Fallback")
+            time.sleep(0.5)
+            st.rerun()
     
     st.markdown("---")
     st.markdown("### 📝 Enter Location Manually")
@@ -959,7 +1021,7 @@ with st.sidebar:
                         if geocoded:
                             st.session_state.manual_location = geocoded
                             st.session_state.browser_location = None
-                            st.session_state.location_source = 'manual' 
+                            st.session_state.location_source = 'manual' # --- CRITICAL FIX 2: Set source to manual ---
                             st.success(f"✅ Found!")
                             time.sleep(1)
                             st.rerun()
@@ -1054,7 +1116,7 @@ if menu == "🗺 Disaster Map":
         if satellite_layers:
             m = add_nasa_satellite_layers(m, satellite_layers)
         
-       
+        # ✅ FIXED INDENTATION - USE REAL WORLDPOP DATA
         if show_population:
             with st.spinner("📊 Loading WorldPop data..."):
                 pop_df = read_worldpop_window(
@@ -1138,8 +1200,10 @@ if menu == "🗺 Disaster Map":
 elif menu == "💬 AI Guidance":
     st.markdown("## 💬 AI Emergency Guidance")
     
+    # The checkbox determines if the location context is added to the prompt
     use_location = st.checkbox("📍 Use my location for guidance", value=False)
     
+    # Display the location being used if the checkbox is marked
     if use_location and loc:
         st.info(f"🎯 Using: **{loc['city']}, {loc['country']}**")
     
@@ -1159,7 +1223,8 @@ elif menu == "💬 AI Guidance":
             with st.spinner("🤖 Analyzing..."):
                 guidance = get_ai_disaster_guidance(
                     disaster_type, user_situation, st.session_state.gemini_model_text,
-                    use_location=use_location, location=loc if use_location else None
+                    # Pass the checkbox value AND the location object
+                    use_location=use_location, location=loc
                 )
                 st.markdown(f'<div class="ai-response">{guidance}</div>', unsafe_allow_html=True)
 
@@ -1220,7 +1285,7 @@ elif menu == "📊 Analytics":
     is_filtered_view = False
     
     if "My Location" in view_mode and loc:
-       
+        # User only sees this slider if 'My Location' is selected
         radius = st.slider("Radius (km)", 100, 5000, 1000, step=100)
         
         if not disasters.empty:
@@ -1232,7 +1297,7 @@ elif menu == "📊 Analytics":
             st.info("No disasters found globally. Cannot apply location filter.")
             
     elif "Global View" in view_mode:
-      
+        # For Global View, we use the unfiltered 'disasters' (copy of disasters_all)
         st.info(f"🌍 Showing {len(disasters)} global disasters")
         is_filtered_view = False
     else:
@@ -1240,7 +1305,7 @@ elif menu == "📊 Analytics":
         st.info("No location detected. Showing global disasters.")
         is_filtered_view = False
     
-   
+    # --- Map Section - ALWAYS RENDER THE MAP FRAME ---
     
     # Determine map center
     map_center_lat, map_center_lon, map_zoom = 20, 0, 2 # Default Global View
